@@ -1,7 +1,4 @@
-# ✅ SWING SNIPER GPT BOT (Full Notebook)
-
-!pip install yfinance ta openai --quiet
-
+import streamlit as st
 import yfinance as yf
 import pandas as pd
 import ta
@@ -9,202 +6,117 @@ from openai import OpenAI
 import smtplib
 from email.mime.text import MIMEText
 
-# ✅ Email Settings
-EMAIL_SENDER = "EMAIL_SENDER"
-EMAIL_PASSWORD = "EMAIL_PASSWORD"  # <- Gmail App Password
-EMAIL_RECEIVER = "EMAIL_RECEIVER"
+# 🌟 Email Configuration
+EMAIL_SENDER = "your_email@gmail.com"
+EMAIL_PASSWORD = "your_app_password"
+EMAIL_RECEIVER = "your_email@gmail.com"
 
 def send_email(subject, body):
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = EMAIL_SENDER
+    msg["To"] = EMAIL_RECEIVER
     try:
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"] = EMAIL_SENDER
-        msg["To"] = EMAIL_RECEIVER
-
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(EMAIL_SENDER, EMAIL_PASSWORD)
             server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
-        print("✅ Email sent.")
+        st.success("📬 Email sent.")
     except Exception as e:
-        print("⚠️ Email failed:", e)
+        st.error(f"⚠️ Email failed: {e}")
 
-# 🔑 Your OpenAI API Key
-client = OpenAI(api_key="OPENAI_API_KEY")
+# 🔐 OpenAI Key
+client = OpenAI(api_key="your_openai_api_key")
 
-# 🔍 Tickers to scan
-tickers = [
-    # 🔹 Growth Stocks
-    "AAPL", "TSLA", "NVDA", "AMD", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "SHOP",
+st.set_page_config(page_title="Swing Sniper GPT", layout="wide")
+st.title("🎯 Swing Sniper GPT")
 
-    # 🔸 Value/Defensive
-    "WMT", "PEP", "KO", "CVS", "JNJ", "PG", "XOM", "VZ", "O",
+with st.sidebar:
+    st.header("🔍 Scan Settings")
+    selected_tickers = st.text_area("Tickers (comma-separated)", "AAPL,TSLA,NVDA,AMD,MSFT")
+    run_scan = st.button("🚀 Run Scan")
 
-    # 🟡 Dividend ETFs
-    "JEPQ", "JEPI", "RYLD", "QYLD", "SCHD", "VYM", "DVY", "HDV",
+if run_scan:
+    tickers = [t.strip().upper() for t in selected_tickers.split(",")]
+    high_confidence_trades = []
 
-    # 🟢 Growth & Index ETFs
-    "QQQ", "SPY", "VOO", "IWM", "ARKK", "TLT", "XLF", "XLE", "XLV", "XLC",
-
-    # 🟠 International Exposure
-    "EWZ", "EEM", "FXI", "EWJ", "IBB",
-
-    # 🟣 Crypto
-    "BTC-USD", "ETH-USD", "SOL-USD", "DOGE-USD", "BNB-USD", "AVAX-USD",
-
-    # 🔵 Commodities
-    "GLD", "SLV", "USO", "UNG", "DBA", "DBC", "PALL"
-]
-
-high_confidence_trades = []
-
-for ticker in tickers:
-    try:
-        print(f"🔍 Scanning {ticker}...")
-        data = yf.download(ticker, period="3mo", interval="1d", auto_adjust=True)
-        print("📊 Raw columns returned:", data.columns.tolist())
-        print(data.tail(1))
-
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = [col[0] for col in data.columns]
-
-        data.rename(columns=lambda x: str(x).capitalize(), inplace=True)
-
-        required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-        if not all(col in data.columns for col in required_cols):
-            print(f"⚠️ {ticker} still missing expected columns. Skipping.")
-            continue
-
-        data = ta.add_all_ta_features(
-            data,
-            open="Open", high="High", low="Low", close="Close", volume="Volume",
-            fillna=True
-        )
-
-        latest = data.iloc[-1]
-        rsi = latest["momentum_rsi"]
-        stochrsi = latest["momentum_stoch_rsi"]
-        macd = latest["trend_macd"]
-        macd_signal = latest["trend_macd_signal"]
-        macd_hist = macd - macd_signal
-        ma20 = latest["trend_sma_fast"]
-        ma150 = latest["trend_sma_slow"]
-        close = latest["Close"]
-        bbm = latest["volatility_bbm"]
-        bbw = latest["volatility_bbw"]
-        bb_low = bbm - bbw
-        volume = latest["Volume"]
-        avg_volume = data["Volume"].rolling(window=20).mean().iloc[-1]
-        adx = latest["trend_adx"]
-
-        if (
-            rsi < 35 and
-            stochrsi < 0.2 and
-            macd > macd_signal and
-            macd_hist > 0 and
-            close > ma150 and close < ma20 and
-            close <= bb_low and
-            volume > avg_volume and
-            adx > 20
-        ):
-            high_confidence_trades.append({
-                "ticker": ticker,
-                "rsi": round(rsi, 2),
-                "stochrsi": round(stochrsi, 2),
-                "macd_hist": round(macd_hist, 3),
-                "close": round(close, 2),
-                "ma20": round(ma20, 2),
-                "ma150": round(ma150, 2),
-                "volume": round(volume),
-                "avg_volume": round(avg_volume),
-                "adx": round(adx, 2)
-            })
-
-    except Exception as e:
-        print(f"⚠️ Error with {ticker}: {e}")
-
-# 📈 Show results
-if not high_confidence_trades:
-    print("\n❌ No trade meets the 80–90% confidence criteria. Try again later.")
-else:
-    print("\n✅ High-confidence trade setup(s) found!")
-    for trade in high_confidence_trades:
-        print(f"\n📊 Ticker: {trade['ticker']}")
-        for key, value in trade.items():
-            if key != "ticker":
-                print(f"{key.upper()}: {value}")
-
-        # GPT Recommendation
-        prompt = f"""
-        You are an expert swing trader. Given the following data, write a 3-4 sentence recommendation:
-        - Ticker: {trade['ticker']}
-        - RSI: {trade['rsi']}
-        - Stochastic RSI: {trade['stochrsi']}
-        - MACD Histogram: {trade['macd_hist']}
-        - Close: {trade['close']}
-        - MA20: {trade['ma20']}
-        - MA150: {trade['ma150']}
-        - Volume: {trade['volume']} vs avg {trade['avg_volume']}
-        - ADX: {trade['adx']}
-
-        Include:
-        - Confidence level from 0% to 100%
-        - Suggested entry price (around close)
-        - Suggested target price
-        - Suggested stop loss
-        - Why this trade is attractive
-        """
-
+    for ticker in tickers:
         try:
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}]
+            st.write(f"🔎 Scanning **{ticker}**...")
+            data = yf.download(ticker, period="3mo", interval="1d", auto_adjust=True)
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = [col[0] for col in data.columns]
+
+            data.rename(columns=lambda x: str(x).capitalize(), inplace=True)
+            data = ta.add_all_ta_features(
+                data, open="Open", high="High", low="Low", close="Close", volume="Volume", fillna=True
             )
-            print("\n🧠 GPT Recommendation:")
-            print(response.choices[0].message.content)
 
-            # ✅ EMAIL ALERT HERE
-            email_body = f"📊 Trade Alert: {trade['ticker']}\n" + response.choices[0].message.content
-            send_email(f"🔔 SniperBot Signal: {trade['ticker']}", email_body)
+            latest = data.iloc[-1]
+            rsi = latest["momentum_rsi"]
+            stochrsi = latest["momentum_stoch_rsi"]
+            macd = latest["trend_macd"]
+            macd_signal = latest["trend_macd_signal"]
+            macd_hist = macd - macd_signal
+            ma20 = latest["trend_sma_fast"]
+            ma150 = latest["trend_sma_slow"]
+            close = latest["Close"]
+            bbm = latest["volatility_bbm"]
+            bbw = latest["volatility_bbw"]
+            bb_low = bbm - bbw
+            volume = latest["Volume"]
+            avg_volume = data["Volume"].rolling(window=20).mean().iloc[-1]
+            adx = latest["trend_adx"]
 
+            if (
+                rsi < 35 and
+                stochrsi < 0.2 and
+                macd > macd_signal and
+                macd_hist > 0 and
+                close > ma150 and close < ma20 and
+                close <= bb_low and
+                volume > avg_volume and
+                adx > 20
+            ):
+                trade = {
+                    "ticker": ticker,
+                    "rsi": round(rsi, 2),
+                    "stochrsi": round(stochrsi, 2),
+                    "macd_hist": round(macd_hist, 3),
+                    "close": round(close, 2),
+                    "ma20": round(ma20, 2),
+                    "ma150": round(ma150, 2),
+                    "volume": round(volume),
+                    "avg_volume": round(avg_volume),
+                    "adx": round(adx, 2)
+                }
+
+                prompt = f"""
+                You are an expert swing trader. Given the following data, write a 3-4 sentence recommendation:
+                - Ticker: {trade['ticker']}
+                - RSI: {trade['rsi']}
+                - Stochastic RSI: {trade['stochrsi']}
+                - MACD Histogram: {trade['macd_hist']}
+                - Close: {trade['close']}
+                - MA20: {trade['ma20']}
+                - MA150: {trade['ma150']}
+                - Volume: {trade['volume']} vs avg {trade['avg_volume']}
+                - ADX: {trade['adx']}
+
+                Include:
+                - Confidence level (0–100%)
+                - Entry price (around close)
+                - Target price
+                - Stop loss
+                - Why this trade is attractive
+                """
+
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                recommendation = response.choices[0].message.content
+                st.subheader(f"📈 {ticker} Setup")
+                st.code(recommendation)
+                send_email(f"🔔 SniperBot Signal: {ticker}", f"📊 {ticker}\n{recommendation}")
         except Exception as e:
-            print("⚠️ GPT Error:", e)
-
-print("\n✅ Scanner complete. You may now close or check results above.")
-
-# ✅ PHASE 3.3: GPT SECTOR + SENTIMENT SNAPSHOT
-print("\n🧠 Running GPT Sector Sentiment Analysis...")
-
-sector_prompt = """
-Act as a financial analyst. Evaluate current macroeconomic trends and sector outlooks for swing traders. 
-Assess likely strength/weakness across these sectors based on news, economic indicators, and seasonality:
-- Technology
-- Healthcare
-- Financials
-- Energy
-- Consumer Staples
-- Consumer Discretionary
-- Communication Services
-- Industrials
-- Real Estate
-- Materials
-- Utilities
-- Crypto
-- Commodities
-
-For each sector, write 1 sentence with current strength (+, -, or ~) and brief reasoning.
-Then give a 4-line summary of the best opportunities.
-"""
-
-try:
-    sector_response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[{"role": "user", "content": sector_prompt}]
-    )
-    summary = sector_response.choices[0].message.content
-    print("\n📈 GPT Sector Summary:\n", summary)
-
-    # Optional: Email the analysis too
-    send_email("🧠 GPT Sector Snapshot", summary)
-
-except Exception as e:
-    print("⚠️ Sector analysis GPT failed:", e)
+            st.error(f"⚠️ Error scanning {ticker}: {e}")
