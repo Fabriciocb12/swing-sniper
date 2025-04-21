@@ -7,10 +7,10 @@ import smtplib
 from email.mime.text import MIMEText
 
 # ------------------------ CONFIG ------------------------
-EMAIL_SENDER = "fabricio2574@gmail.com"
-EMAIL_PASSWORD = "tgqm voqi sacf ydnt"
-EMAIL_RECEIVER = "fabricio2574@gmail.com"
-OPENAI_API_KEY = "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"
+EMAIL_SENDER = "EMAIL_SENDER"
+EMAIL_PASSWORD = "EMAIL_PASSWORD"
+EMAIL_RECEIVER = "EMAIL_RECEIVER"
+OPENAI_API_KEY = "OPENAI_API_KEY"
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
