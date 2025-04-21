@@ -1,169 +1,113 @@
+# ✅ SWING SNIPER GPT BOT - Phase 3.4 (Red Zone, HMA, Squeeze, Slider, UI Boost)
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import ta
 from openai import OpenAI
+import os
 import smtplib
 from email.mime.text import MIMEText
 
-# ------------------------ CONFIG ------------------------
-EMAIL_SENDER = "EMAIL_SENDER"
-EMAIL_PASSWORD = "EMAIL_PASSWORD"
-EMAIL_RECEIVER = "EMAIL_RECEIVER"
-OPENAI_API_KEY = "OPENAI_API_KEY"
+# ✅ ENV variables (Set these in Render dashboard under Environment section)
+EMAIL_SENDER = os.getenv("EMAIL_SENDER")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-# ------------------------ FUNCTIONS ------------------------
-def send_email(subject, body):
-    try:
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"] = EMAIL_SENDER
-        msg["To"] = EMAIL_RECEIVER
+# ✅ Main UI
+st.set_page_config(page_title="Swing Sniper GPT", layout="wide")
+st.title("🎯 Swing Sniper GPT")
+st.markdown("""
+<style>
+.big-banner {font-size: 1.3rem; background: #111; color: lime; padding: 10px; border-radius: 10px;}
+</style>
+""", unsafe_allow_html=True)
 
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
-            server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
-        st.success("📧 Email sent successfully!")
-    except Exception as e:
-        st.error(f"⚠️ Email failed: {e}")
+# ✅ Slider: Success Probability Threshold
+confidence_threshold = st.slider("Minimum Confidence %", 50, 95, 80, step=10)
 
-def run_analysis():
-    tickers = st.session_state.tickers
+# ✅ Red Zone Protocol Toggle
+red_zone = st.toggle("🚨 Red Zone Protocol")
+
+# ✅ Button to Launch Scan
+if st.button("🔍 Scan Market"):
+    st.markdown('<div class="big-banner">Scanning tickers... stand by 🔄</div>', unsafe_allow_html=True)
+
+    panic_assets = ["IAU", "GLD", "SDS", "SH", "RWM", "VIXY", "UVXY", "TLT", "BIL", "SHY", "BTC-USD", "ETH-USD"]
+    default_tickers = ["AAPL", "TSLA", "NVDA", "AMD", "MSFT", "JEPQ", "JEPI", "QQQ", "SPY"]
+    tickers = panic_assets if red_zone else default_tickers
+
     high_confidence_trades = []
 
-    with st.spinner("🔍 Scanning tickers..."):
-        for ticker in tickers:
-            try:
-                data = yf.download(ticker, period="3mo", interval="1d", auto_adjust=True)
+    for ticker in tickers:
+        try:
+            data = yf.download(ticker, period="3mo", interval="1d", auto_adjust=True)
+            data.rename(columns=lambda x: str(x).capitalize(), inplace=True)
+            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            if not all(col in data.columns for col in required_cols):
+                continue
 
-                if isinstance(data.columns, pd.MultiIndex):
-                    data.columns = [col[0] for col in data.columns]
+            # TA Features
+            data = ta.add_all_ta_features(
+                data, open="Open", high="High", low="Low", close="Close", volume="Volume", fillna=True
+            )
 
-                data.rename(columns=lambda x: str(x).capitalize(), inplace=True)
+            # HMA Breakout (custom)
+            data['HMA'] = data['Close'].rolling(window=20).mean().rolling(window=2).mean()
+            breakout = data['Close'].iloc[-1] > data['HMA'].iloc[-1]
 
-                required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-                if not all(col in data.columns for col in required_cols):
-                    continue
+            # Squeeze Momentum Oscillator (simplified)
+            data['squeeze'] = data['volatility_bbw'] < data['volatility_bbw'].rolling(window=20).mean()
+            squeeze_trigger = data['squeeze'].iloc[-1] == False
 
-                data = ta.add_all_ta_features(
-                    data,
-                    open="Open", high="High", low="Low", close="Close", volume="Volume",
-                    fillna=True
+            latest = data.iloc[-1]
+            rsi = latest["momentum_rsi"]
+            stochrsi = latest["momentum_stoch_rsi"]
+            macd_hist = latest["trend_macd"] - latest["trend_macd_signal"]
+            adx = latest["trend_adx"]
+            volume = latest["Volume"]
+            avg_volume = data["Volume"].rolling(window=20).mean().iloc[-1]
+            close = latest["Close"]
+
+            # Criteria
+            if (
+                rsi < 35 and stochrsi < 0.2 and macd_hist > 0 and adx > 20 and
+                volume > avg_volume and breakout and squeeze_trigger
+            ):
+                # GPT Recommendation
+                prompt = f"""
+                You're an expert swing trader. Based on:
+                RSI: {rsi}, StochRSI: {stochrsi}, MACD-Hist: {macd_hist}, ADX: {adx}, Volume Spike
+                Also includes HMA breakout and Squeeze Momentum confirmation.
+                Give recommendation with confidence level from 50-95%. Return entry, target, and stop loss.
+                """
+
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}]
                 )
 
-                latest = data.iloc[-1]
-                rsi = latest["momentum_rsi"]
-                stochrsi = latest["momentum_stoch_rsi"]
-                macd = latest["trend_macd"]
-                macd_signal = latest["trend_macd_signal"]
-                macd_hist = macd - macd_signal
-                ma20 = latest["trend_sma_fast"]
-                ma150 = latest["trend_sma_slow"]
-                close = latest["Close"]
-                bbm = latest["volatility_bbm"]
-                bbw = latest["volatility_bbw"]
-                bb_low = bbm - bbw
-                volume = latest["Volume"]
-                avg_volume = data["Volume"].rolling(window=20).mean().iloc[-1]
-                adx = latest["trend_adx"]
+                # Email Alert
+                msg = MIMEText(response.choices[0].message.content)
+                msg["Subject"] = f"📈 SniperBot Triggered: {ticker}"
+                msg["From"] = EMAIL_SENDER
+                msg["To"] = EMAIL_RECEIVER
+                with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                    server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+                    server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
 
-                if (
-                    rsi < 35 and
-                    stochrsi < 0.2 and
-                    macd > macd_signal and
-                    macd_hist > 0 and
-                    close > ma150 and close < ma20 and
-                    close <= bb_low and
-                    volume > avg_volume and
-                    adx > 20
-                ):
-                    high_confidence_trades.append({
-                        "ticker": ticker,
-                        "rsi": round(rsi, 2),
-                        "stochrsi": round(stochrsi, 2),
-                        "macd_hist": round(macd_hist, 3),
-                        "close": round(close, 2),
-                        "ma20": round(ma20, 2),
-                        "ma150": round(ma150, 2),
-                        "volume": round(volume),
-                        "avg_volume": round(avg_volume),
-                        "adx": round(adx, 2)
-                    })
-
-            except Exception as e:
-                st.warning(f"⚠️ {ticker} error: {e}")
-
-    if not high_confidence_trades:
-        st.error("❌ No high-confidence trades found today. Try again tomorrow.")
-        return
-
-    st.success("✅ High-confidence trade(s) found:")
-
-    for trade in high_confidence_trades:
-        st.subheader(f"📊 {trade['ticker']}")
-        st.json(trade)
-
-        prompt = f"""
-        You are an expert swing trader. Given the following data, write a 3-4 sentence recommendation:
-        - Ticker: {trade['ticker']}
-        - RSI: {trade['rsi']}
-        - Stochastic RSI: {trade['stochrsi']}
-        - MACD Histogram: {trade['macd_hist']}
-        - Close: {trade['close']}
-        - MA20: {trade['ma20']}
-        - MA150: {trade['ma150']}
-        - Volume: {trade['volume']} vs avg {trade['avg_volume']}
-        - ADX: {trade['adx']}
-
-        Include:
-        - Confidence level from 0% to 100%
-        - Suggested entry price (around close)
-        - Suggested target price
-        - Suggested stop loss
-        - Why this trade is attractive
-        """
-
-        try:
-            response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            gpt_advice = response.choices[0].message.content
-            st.markdown(f"**🧠 GPT Analysis:**\n\n{gpt_advice}")
-
-            if st.button(f"📩 Send Email for {trade['ticker']}"):
-                send_email(f"Sniper Signal: {trade['ticker']}", gpt_advice)
+                # Store
+                high_confidence_trades.append((ticker, response.choices[0].message.content))
 
         except Exception as e:
-            st.error(f"GPT Error: {e}")
+            st.error(f"⚠️ {ticker} failed: {e}")
 
-# ------------------------ STREAMLIT UI ------------------------
-st.set_page_config(page_title="📈 Swing Sniper GPT", layout="centered")
-st.title("🎯 Swing Sniper GPT Bot")
-st.markdown("""
-Welcome to **Swing Sniper GPT** — your AI-powered swing trade assistant built by Fabricio 💼
-
-Click below to run a full scan across markets using AI + TA.
-""")
-
-if "tickers" not in st.session_state:
-    st.session_state.tickers = [
-        "AAPL", "TSLA", "NVDA", "AMD", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "SHOP",
-        "WMT", "PEP", "KO", "CVS", "JNJ", "PG", "XOM", "VZ", "O",
-        "JEPQ", "JEPI", "RYLD", "QYLD", "SCHD", "VYM", "DVY", "HDV",
-        "QQQ", "SPY", "VOO", "IWM", "ARKK", "TLT", "XLF", "XLE", "XLV", "XLC",
-        "EWZ", "EEM", "FXI", "EWJ", "IBB",
-        "BTC-USD", "ETH-USD", "SOL-USD", "DOGE-USD", "BNB-USD", "AVAX-USD",
-        "GLD", "SLV", "USO", "UNG", "DBA", "DBC", "PALL"
-    ]
-
-if st.button("🚀 Run Full Scanner"):
-    run_analysis()
-
-st.markdown("""
----
-👣 *Powered by ChatGPT · Crafted with 💡 by Fabricio Castro*
-""")
+    if not high_confidence_trades:
+        st.warning("No trades hit the target today.")
+    else:
+        for ticker, recommendation in high_confidence_trades:
+            st.success(f"📊 {ticker}")
+            st.markdown(recommendation)
 
