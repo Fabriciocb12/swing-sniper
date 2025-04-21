@@ -1,0 +1,66 @@
+# 📂 FILE: backtest_engine.py
+# This file contains the backtesting logic for Swing Sniper GPT
+
+import yfinance as yf
+import pandas as pd
+import ta
+from datetime import datetime, timedelta
+
+
+def download_data(ticker, period="6mo", interval="1d"):
+    df = yf.download(ticker, period=period, interval=interval, auto_adjust=True)
+    if df.empty:
+        raise ValueError(f"No data for {ticker}")
+    df = ta.add_all_ta_features(df, open="Open", high="High", low="Low", close="Close", volume="Volume", fillna=True)
+    return df
+
+
+def simulate_trades(df, ticker, success_criteria):
+    results = []
+    for i in range(150, len(df)):
+        row = df.iloc[i]
+
+        # Example: same indicators used in live scanner
+        rsi = row["momentum_rsi"]
+        stochrsi = row["momentum_stoch_rsi"]
+        macd_hist = row["trend_macd"] - row["trend_macd_signal"]
+        close = row["Close"]
+        ma150 = row["trend_sma_slow"]
+        ma20 = row["trend_sma_fast"]
+        bbm = row["volatility_bbm"]
+        bbw = row["volatility_bbw"]
+        bb_low = bbm - bbw
+        adx = row["trend_adx"]
+        volume = row["Volume"]
+        avg_volume = df["Volume"].iloc[i-20:i].mean()
+
+        passed = (
+            rsi < 35 and stochrsi < 0.2 and macd_hist > 0 and
+            close > ma150 and close < ma20 and close <= bb_low and
+            volume > avg_volume and adx > 20
+        )
+
+        if passed:
+            # Look ahead X days for profit
+            future_window = df.iloc[i+1:i+6]["Close"]
+            if len(future_window) < 5:
+                continue
+            max_gain = ((future_window.max() - close) / close) * 100
+            label = int(max_gain >= success_criteria)
+
+            results.append({
+                "ticker": ticker,
+                "date": df.index[i],
+                "rsi": rsi,
+                "stochrsi": stochrsi,
+                "macd_hist": macd_hist,
+                "close": close,
+                "ma150": ma150,
+                "ma20": ma20,
+                "adx": adx,
+                "volume": volume,
+                "avg_volume": avg_volume,
+                "label": label  # 1 = success, 0 = fail
+            })
+
+    return pd.DataFrame(results)
