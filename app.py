@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Import backtest functions from backtest_tab.py
-from backtest_tab import backtest_tab <-- Make sure this import line is here
+from backtest_tab import backtest_tab  # <-- Correct import statement
 
 # Load from secrets
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
