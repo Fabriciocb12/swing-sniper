@@ -1,16 +1,24 @@
 import json
+from datetime import datetime
 
-# Initial unlocked state
+# Full list of assets, including panic-mode assets
 tickers = [
     "AAPL", "TSLA", "NVDA", "AMD", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "SHOP",
     "WMT", "PEP", "KO", "CVS", "JNJ", "PG", "XOM", "VZ", "O", "JEPQ", "JEPI", "RYLD",
-    "QYLD", "SCHD", "VYM", "QQQ", "SPY", "VIXY", "IAU", "GLD", "SDS"
+    "QYLD", "SCHD", "VYM", "QQQ", "SPY", "VIXY", "IAU", "GLD", "SDS", "SH", "RWM",
+    "UVXY", "TLT", "BIL", "SHY"
 ]
 
-locked_data = {ticker: {"locked": False} for ticker in tickers}
+# Default locked state
+locked_data = {
+    ticker: {
+        "locked": False,
+        "timestamp": None
+    } for ticker in tickers
+}
 
-# Save to JSON file
+# Save to file
 with open("locked_positions.json", "w") as f:
     json.dump(locked_data, f, indent=2)
 
-print("✅ locked_positions.json file created.")
+print("✅ locked_positions.json file created with timestamps.")
