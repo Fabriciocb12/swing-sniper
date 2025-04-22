@@ -78,7 +78,7 @@ main_tickers = [
 ]
 final_tickers = main_tickers + panic_assets
 
-# Dynamic Confidence Logic (Updated)
+# Define the dynamic confidence function
 def get_trade_confidence(data):
     base_confidence = 50  # Default confidence for medium confidence trades
     
@@ -260,4 +260,3 @@ if trade_button:
         st.error("❌ No high-confidence trades found. Try again later.")
     else:
         st.success("✅ High-confidence trade(s) found!")
-
