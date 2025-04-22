@@ -25,7 +25,9 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 st.set_page_config(page_title="Swing Sniper GPT", layout="wide")
 st.title("🎯 Swing Sniper GPT")
 
-confidence_threshold = st.slider("Set Trade Confidence Threshold %", 50, 95, 80, step=10)
+# Adjust the confidence threshold slider to include 30% and 40%
+confidence_threshold = st.slider("Set Trade Confidence Threshold %", 30, 95, 80, step=10)
+
 red_zone_enabled = st.checkbox("🚨 Enable Red Zone Mode (Bear Market Protocol)")
 
 if red_zone_enabled:
