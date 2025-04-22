@@ -114,6 +114,10 @@ if trade_button:
 
             data = yf.download(ticker, period="3mo", interval="1d", auto_adjust=True)
 
+            # Flatten the dataframe if needed (remove multi-index columns)
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = [col[0] for col in data.columns]  # Flatten to single level
+
             # Add the new indicators using the `ta` library
             data['bbm'] = ta.volatility.bollinger_mavg(data['Close'])
             data['bbw'] = ta.volatility.bollinger_width(data['Close'])
