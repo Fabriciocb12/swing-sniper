@@ -80,39 +80,6 @@ main_tickers = [
 
 final_tickers = main_tickers + panic_assets
 
-# Define the dynamic confidence function
-def get_trade_confidence(data):
-    base_confidence = 50  # Default confidence for medium confidence trades
-    
-    # Low confidence (30-40% confidence for riskier trades)
-    if (
-        data['RSI'].iloc[-1] < 50 and  # Loosen RSI condition (below 50)
-        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # MACD above signal line
-        data['Close'].iloc[-1] > data['bb_upper'].iloc[-1] and  # Breakout above upper Bollinger Band
-        data['ATR'].iloc[-1] > data['ATR'].mean() and  # High ATR (indicating higher volatility)
-        data['OBV'].iloc[-1] > data['OBV'].iloc[-2]  # Increasing OBV (buying pressure)
-    ):
-        base_confidence = 30  # Low confidence for riskier trades
-
-    # Medium confidence (50-70% confidence for standard trades)
-    elif (
-        data['RSI'].iloc[-1] < 35 and  # Stronger oversold condition
-        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # Strong MACD alignment
-        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1]  # EMA9 above EMA21 for stronger momentum
-    ):
-        base_confidence = 60  # Medium confidence for standard trades
-
-    # High confidence (80-90% confidence for stricter trades)
-    elif (
-        data['RSI'].iloc[-1] < 30 and  # Very strong oversold condition
-        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # Very strong MACD alignment
-        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1] and  # EMA9 above EMA21
-        data['BB_upper'].iloc[-1] < data['Close'].iloc[-1]  # Strong breakout above the upper Bollinger Band
-    ):
-        base_confidence = 90  # High confidence for the strongest trades
-
-    return base_confidence
-
 # 🧠 Backtest Functionality
 # Add a new section for the backtest tab
 st.sidebar.title("Backtest Strategy")
@@ -150,6 +117,9 @@ if trade_button:
             # Flatten the dataframe if needed (remove multi-index columns)
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = [col[0] for col in data.columns]  # Flatten to single level
+
+            # Manually calculate RSI
+            data['RSI'] = ta.momentum.rsi(data['Close'], window=14)
 
             # Calculate Bollinger Bands manually (Fixing the bollinger_width issue)
             data['bb_upper'] = ta.volatility.bollinger_hband(data['Close'])
@@ -194,46 +164,4 @@ if trade_button:
 
                 # Send email and log trade details
                 prompt = f"""
-                You are an expert swing trader. Given the following data, write a 3-4 sentence recommendation:
-                - Ticker: {trade['ticker']}
-                - RSI: {trade['rsi']}
-                - MACD Histogram: {trade['macd_hist']}
-                - Close: {trade['close']}
-                - EMA9: {trade['ema9']}
-                - EMA21: {trade['ema21']}
-                - Volume: {trade['volume']}
-                - Bollinger Band Upper: {trade['bb_upper']}
-
-                Include:
-                - Confidence level from 0% to 100%
-                - Suggested entry price (around close)
-                - Suggested target price
-                - Suggested stop loss
-                - Why this trade is attractive
-                """
-
-                response = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                gpt_output = response.choices[0].message.content
-                st.markdown(f"### 📈 {trade['ticker']}")
-                st.text(gpt_output)
-                high_confidence_trades.append(trade)
-                send_email(f"🔔 SniperBot Signal: {trade['ticker']}", gpt_output)
-
-                # ✅ Lock the trade
-                locked_positions[ticker] = {
-                    "entry_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "entry_price": float(trade['close']),
-                    "note": "Locked by model"
-                }
-                save_locked_positions()
-
-        except Exception as e:
-            st.warning(f"⚠️ {ticker} failed: {e}")
-
-    if not high_confidence_trades:
-        st.error("❌ No high-confidence trades found. Try again later.")
-    else:
-        st.success("✅ High-confidence trade(s) found!")
+                You are an expert swing trader. Given the following data, write a 3-
