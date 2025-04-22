@@ -19,17 +19,11 @@ def backtest_strategy(data):
     data['Signal'][50:] = np.where(data['SMA_50'][50:] > data['SMA_200'][50:], 1, 0)
     data['Position'] = data['Signal'].diff()
 
-    data['P&L'] = data['Position'] * data['Close'].pct_change()  # Percent change in price
+    # Calculate P&L correctly (make sure it's a single column)
+    pct_change = data['Close'].pct_change()  # Percentage change in Close
+    data['P&L'] = data['Position'] * pct_change  # Multiply Position by pct_change to calculate P&L
+
+    # Cumulative P&L (Portfolio)
     data['Portfolio'] = (1 + data['P&L']).cumprod()  # Cumulative product of P&L
 
     return data
-
-def plot_results(data):
-    # Plot the portfolio performance (equity curve)
-    plt.figure(figsize=(10, 6))
-    plt.plot(data['Portfolio'], label='Strategy Portfolio', color='blue')
-    plt.title('Backtest Results - Portfolio Performance')
-    plt.xlabel('Date')
-    plt.ylabel('Portfolio Value')
-    plt.legend()
-    return plt
