@@ -1,6 +1,9 @@
+# backtest_tab.py
+
 import yfinance as yf
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
 
 def fetch_data(ticker):
     # Download data for the ticker for the past 1 year
@@ -23,8 +26,6 @@ def backtest_strategy(data):
 
 def plot_results(data):
     # Plot the portfolio performance (equity curve)
-    import matplotlib.pyplot as plt
-
     plt.figure(figsize=(10, 6))
     plt.plot(data['Portfolio'], label='Strategy Portfolio', color='blue')
     plt.title('Backtest Results - Portfolio Performance')
