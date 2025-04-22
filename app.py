@@ -143,14 +143,10 @@ if trade_button:
             # Manually calculate RSI
             data['RSI'] = ta.momentum.rsi(data['Close'], window=14)
 
-            # Ensure RSI is being added to DataFrame
-            if 'RSI' not in data.columns:
-                st.warning(f"RSI calculation failed for {ticker}")
-                continue
-
             # Calculate other indicators as before
             data['bb_upper'] = ta.volatility.bollinger_hband(data['Close'])
             data['bb_lower'] = ta.volatility.bollinger_lband(data['Close'])
+            data['bb_middle'] = data['Close'].rolling(window=20).mean()  # Adding bb_middle (middle band)
             data['bb_width'] = data['bb_upper'] - data['bb_lower']  # Manual width calculation
 
             data['ATR'] = ta.volatility.average_true_range(data['High'], data['Low'], data['Close'], window=14)
