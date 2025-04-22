@@ -1,0 +1,16 @@
+import json
+
+# Initial unlocked state
+tickers = [
+    "AAPL", "TSLA", "NVDA", "AMD", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "SHOP",
+    "WMT", "PEP", "KO", "CVS", "JNJ", "PG", "XOM", "VZ", "O", "JEPQ", "JEPI", "RYLD",
+    "QYLD", "SCHD", "VYM", "QQQ", "SPY", "VIXY", "IAU", "GLD", "SDS"
+]
+
+locked_data = {ticker: {"locked": False} for ticker in tickers}
+
+# Save to JSON file
+with open("locked_positions.json", "w") as f:
+    json.dump(locked_data, f, indent=2)
+
+print("✅ locked_positions.json file created.")
