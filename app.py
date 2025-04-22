@@ -11,6 +11,9 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 
+# Import backtest functions from backtest_tab.py
+import backtest_tab  # <-- Make sure this import line is here
+
 # Load from secrets
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EMAIL_SENDER = os.getenv("EMAIL_SENDER")
@@ -91,32 +94,10 @@ if st.sidebar.button("Run Backtest"):
     data = fetch_data(selected_ticker_backtest)
 
     # ✅ Backtest Strategy (simple moving average crossover)
-    def backtest_strategy(data):
-        data['SMA_50'] = data['Close'].rolling(window=50).mean()  # 50-day moving average
-        data['SMA_200'] = data['Close'].rolling(window=200).mean()  # 200-day moving average
-
-        data['Signal'] = 0
-        data['Signal'][50:] = np.where(data['SMA_50'][50:] > data['SMA_200'][50:], 1, 0)
-        data['Position'] = data['Signal'].diff()
-
-        data['P&L'] = data['Position'] * data['Close'].pct_change()
-        data['Portfolio'] = (1 + data['P&L']).cumprod()
-
-        return data
-
-    backtest_results = backtest_strategy(data)
+    backtest_results = backtest_tab.backtest_strategy(data)  # Using the backtest function from backtest_tab.py
 
     # ✅ Plot Results
-    def plot_results(data):
-        plt.figure(figsize=(10,6))
-        plt.plot(data['Portfolio'], label='Strategy Portfolio', color='blue')
-        plt.title('Backtest Results - Portfolio Performance')
-        plt.xlabel('Date')
-        plt.ylabel('Portfolio Value')
-        plt.legend()
-        st.pyplot(plt)
-
-    plot_results(backtest_results)
+    backtest_tab.plot_results(backtest_results)  # Plot the results using the plot function from backtest_tab.py
 
 # Main trade scan button (already existing)
 if trade_button:
