@@ -22,6 +22,8 @@ def backtest_strategy(data):
 
     # Calculate P&L correctly (ensure it’s a single column)
     pct_change = data['Close'].pct_change()  # Percentage change in Close price
+    
+    # Ensure pct_change is a Series and not a DataFrame
     data['P&L'] = data['Position'] * pct_change  # P&L is the change in price when a position is taken
 
     # Cumulative P&L (Portfolio performance)
