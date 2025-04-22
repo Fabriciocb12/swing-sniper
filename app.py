@@ -171,13 +171,12 @@ if trade_button:
             obv_condition = data['OBV'].iloc[-1] > data['OBV'].iloc[-2]
 
             # Print each condition for debugging
-            st.write(f"RSI condition: {rsi_condition}")
-            st.write(f"MACD condition: {macd_condition}")
-            st.write(f"Bollinger condition: {bollinger_condition}")
-            st.write(f"ATR condition: {atr_condition}")
-            st.write(f"OBV condition: {obv_condition}")
-
-            match = rsi_condition and macd_condition and bollinger_condition and atr_condition and obv_condition
+            if match:
+                st.write(f"RSI condition: {rsi_condition}")
+                st.write(f"MACD condition: {macd_condition}")
+                st.write(f"Bollinger condition: {bollinger_condition}")
+                st.write(f"ATR condition: {atr_condition}")
+                st.write(f"OBV condition: {obv_condition}")
 
             if match:
                 trade = {
