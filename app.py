@@ -1,200 +1,212 @@
-# Full app.py - Swing Sniper GPT Bot
-# This bot scans multiple tickers, calculates technical indicators, filters based on confidence,
-# sends email notifications for high-confidence trades, and logs the trades for future learning.
-
-import streamlit as st
+import yfinance as yf
 import pandas as pd
-import numpy as np
-import json
-import os
+import ta
+import streamlit as st
 import smtplib
 from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-import datetime
-import yfinance as yf
+from openai import OpenAI
+import os
+import json
+from datetime import datetime
+import matplotlib.pyplot as plt
+import numpy as np
 
-# Optional: If you have OpenAI GPT setup
-try:
-    import openai
-except ImportError:
-    openai = None
+# Import backtest functions from backtest_tab.py
+from backtest_tab import backtest_tab  # <-- Correct import statement
 
-# Technical Indicators Calculation Functions
-def compute_RSI(close: pd.Series, period: int = 14) -> pd.Series:
-    delta = close.diff()
-    up = delta.clip(lower=0)
-    down = -delta.clip(upper=0)
-    avg_gain = up.rolling(window=period, min_periods=period).mean()
-    avg_loss = down.rolling(window=period, min_periods=period).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+# Load from secrets
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+EMAIL_SENDER = os.getenv("EMAIL_SENDER")
+EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
+EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
 
-def compute_MACD(close: pd.Series, fast=12, slow=26, signal=9):
-    exp1 = close.ewm(span=fast, adjust=False).mean()
-    exp2 = close.ewm(span=slow, adjust=False).mean()
-    macd_line = exp1 - exp2
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    macd_hist = macd_line - signal_line
-    return macd_line, signal_line, macd_hist
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-def compute_Bollinger(close: pd.Series, window: int = 20, num_std: float = 2.0):
-    ma = close.rolling(window=window, min_periods=window).mean()
-    std = close.rolling(window=window, min_periods=window).std()
-    upper_band = ma + num_std * std
-    lower_band = ma - num_std * std
-    return ma, upper_band, lower_band
+st.set_page_config(page_title="Swing Sniper GPT", layout="wide")
+st.title("🎯 Swing Sniper GPT")
 
-def compute_ATR(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
-    prev_close = close.shift(1)
-    tr = pd.DataFrame({
-        'hl': high - low,
-        'hc': (high - prev_close).abs(),
-        'lc': (low - prev_close).abs()
-    })
-    tr = tr.max(axis=1)
-    atr = tr.rolling(window=period, min_periods=period).mean()
-    return atr
+confidence_threshold = st.slider("Set Trade Confidence Threshold %", 50, 95, 80, step=10)
+red_zone_enabled = st.checkbox("🚨 Enable Red Zone Mode (Bear Market Protocol)")
 
-def compute_OBV(close: pd.Series, volume: pd.Series) -> pd.Series:
-    obv = pd.Series(np.zeros_like(close), index=close.index)
-    for i in range(1, len(close)):
-        if close.iloc[i] > close.iloc[i-1]:
-            obv.iloc[i] = obv.iloc[i-1] + volume.iloc[i]
-        elif close.iloc[i] < close.iloc[i-1]:
-            obv.iloc[i] = obv.iloc[i-1] - volume.iloc[i]
-        else:
-            obv.iloc[i] = obv.iloc[i-1]
-    return obv
+if red_zone_enabled:
+    st.markdown("### 🔴 Red Zone Mode: ON")
+    panic_assets = ["IAU", "GLD", "SDS", "SH", "RWM", "VIXY", "UVXY", "TLT", "BIL", "SHY"]
+else:
+    st.markdown("### 🟢 Red Zone Mode: OFF")
+    panic_assets = []
 
-# Email configuration (replace with your actual details)
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-EMAIL_ADDRESS = "youremail@example.com"  # Replace with your email
-EMAIL_PASSWORD = "yourpassword"  # Replace with your email password
-EMAIL_RECIPIENT = "recipient@example.com"  # Replace with recipient's email
+trade_button = st.button("🔍 Scan for Trades")
+status_placeholder = st.empty()
 
-# ========== User Interface (Streamlit) ==========
-st.set_page_config(page_title="Swing Sniper GPT Bot", layout="wide")
-st.title("Swing Sniper GPT Bot")
-
-# Ticker input
-tickers_input = st.text_input("Enter tickers to scan (comma-separated):", value="AAPL, MSFT, TSLA, GOOGL, AMZN")
-tickers = [t.strip().upper() for t in tickers_input.split(",")]
-
-# Red Zone mode toggle
-red_zone = st.checkbox("Red Zone Mode (include panic tickers)")
-
-# Confidence threshold slider (1% to 100%)
-threshold = st.slider("Confidence Threshold (%)", min_value=1, max_value=100, value=50, step=1)
-st.write(f"Current sensitivity threshold: {threshold}%")
-
-# Scan button
-scan_button = st.button("Scan for Trades")
-
-# Placeholder for scan result display
-alert_placeholder = st.empty()
-analysis_placeholder = st.empty()
-
-# Fetch data function (yfinance)
-def fetch_data(ticker):
+# ✅ Email Sender
+def send_email(subject, body):
     try:
-        data = yf.download(ticker, period="3mo", interval="1d")
-        return data
+        msg = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"] = EMAIL_SENDER
+        msg["To"] = EMAIL_RECEIVER
+
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+            server.login(EMAIL_SENDER, EMAIL_PASSWORD)
+            server.sendmail(EMAIL_SENDER, EMAIL_RECEIVER, msg.as_string())
+        st.success("📬 Email alert sent!")
     except Exception as e:
-        st.write(f"Error fetching data for {ticker}: {e}")
-        return None
+        st.error(f"📪 Email failed: {e}")
 
-# Scan for trades function
-def scan_for_trades(tickers, threshold):
-    best_trade = None
-    best_confidence = 0.0
-    best_signals = None  # Store indicator values for analysis of best trade
-    for ticker in tickers:
-        data = fetch_data(ticker)
-        if data is None or data.empty:
-            continue
+# ✅ Load Locked Positions from JSON
+LOCK_FILE = "locked_positions.json"
+if os.path.exists(LOCK_FILE):
+    with open(LOCK_FILE, "r") as f:
+        locked_positions = json.load(f)
+else:
+    locked_positions = {}
 
-        close = data['Close']
-        rsi = compute_RSI(close).iloc[-1]
-        macd_line, signal_line, macd_hist = compute_MACD(close)
-        ma, upper_band, lower_band = compute_Bollinger(close)
-        atr = compute_ATR(data['High'], data['Low'], close).iloc[-1]
-        obv = compute_OBV(close, data['Volume']).iloc[-1]
+# ✅ Save Locked Positions to JSON
+def save_locked_positions():
+    with open(LOCK_FILE, "w") as f:
+        json.dump(locked_positions, f, indent=2)
 
-        # Confidence calculation based on indicators
-        conf_base = 0
-        if rsi < 30:
-            conf_base += 25  # RSI oversold
-        if macd_hist > 0:
-            conf_base += 25  # MACD bullish
-        if close.iloc[-1] < lower_band.iloc[-1]:
-            conf_base += 25  # Bollinger Band oversold
-        if obv > obv.shift(1).iloc[-1]:
-            conf_base += 25  # OBV upward
+# Tickers
+main_tickers = [
+    "AAPL", "TSLA", "NVDA", "AMD", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "SHOP",
+    "WMT", "PEP", "KO", "CVS", "JNJ", "PG", "XOM", "VZ", "O",
+    "JEPQ", "JEPI", "RYLD", "QYLD", "SCHD", "VYM", "DVY", "HDV",
+    "QQQ", "SPY", "VOO", "IWM", "ARKK", "XLF", "XLE", "XLV", "XLC",
+    "EWZ", "EEM", "FXI", "EWJ", "IBB",
+    "BTC-USD", "ETH-USD"
+]
 
-        confidence = conf_base * (1 - atr / 100)  # Adjust confidence based on ATR (volatility)
-        
-        if confidence > threshold and confidence > best_confidence:
-            best_confidence = confidence
-            best_trade = ticker
-            best_signals = {
-                "RSI": rsi,
-                "MACD_hist": macd_hist,
-                "Close": close.iloc[-1],
-                "UpperBand": upper_band.iloc[-1],
-                "LowerBand": lower_band.iloc[-1],
-                "ATR": atr,
-                "OBV": obv
-            }
+final_tickers = main_tickers + panic_assets
 
-    return best_trade, best_confidence, best_signals
+# 🧠 Backtest Functionality
+# Add a new section for the backtest tab
+st.sidebar.title("Backtest Strategy")
+selected_ticker_backtest = st.sidebar.selectbox("Select Ticker for Backtest", final_tickers)
 
-# If Scan button is pressed, perform trade scanning
-if scan_button:
-    best_trade, best_confidence, best_signals = scan_for_trades(tickers, threshold)
-    if best_trade:
-        # Display alert for best trade
-        alert_placeholder.success(f"Trade Alert: **{best_trade}** with confidence **{best_confidence:.1f}%**")
-        # Generate analysis text for the best trade
-        analysis_text = f"RSI: {best_signals['RSI']}, MACD: {best_signals['MACD_hist']}, ATR: {best_signals['ATR']}, OBV: {best_signals['OBV']}"
-        analysis_placeholder.markdown("**Analysis**: " + analysis_text)
-        
-        # Send email notification
+if st.sidebar.button("Run Backtest"):
+    st.write(f"Running backtest for {selected_ticker_backtest}...")
+
+    # ✅ Fetch Data for the selected ticker
+    def fetch_data(ticker):
+        data = yf.download(ticker, period="1y", interval="1d")
+        return data
+
+    data = fetch_data(selected_ticker_backtest)
+
+    # ✅ Backtest Strategy (simple moving average crossover)
+    backtest_results = backtest_tab.backtest_strategy(data)  # Using the backtest function from backtest_tab.py
+
+    # ✅ Plot Results
+    backtest_tab.plot_results(backtest_results)  # Plot the results using the plot function from backtest_tab.py
+
+# Main trade scan button (already existing)
+if trade_button:
+    high_confidence_trades = []
+    for ticker in final_tickers:
         try:
-            msg = MIMEMultipart()
-            msg["From"] = EMAIL_ADDRESS
-            msg["To"] = EMAIL_RECIPIENT
-            msg["Subject"] = f"Trade Alert: {best_trade} at {best_confidence:.1f}% confidence"
-            body = f"Confidence: {best_confidence:.1f}%\n\n{analysis_text}"
-            msg.attach(MIMEText(body, "plain"))
-            server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
-            server.starttls()
-            server.login(EMAIL_ADDRESS, EMAIL_PASSWORD)
-            server.send_message(msg)
-            server.quit()
-            st.write("Email notification sent.")
-        except Exception as e:
-            st.error(f"Failed to send email: {e}")
+            if ticker in locked_positions:
+                st.warning(f"🔒 {ticker} is already locked-in.")
+                continue
 
-        # Log the trade to a local JSON file for training later
-        trade_log_entry = {
-            "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "ticker": best_trade,
-            "confidence": round(best_confidence, 2),
-            "signals": best_signals
-        }
-        log_file = "trade_logs.json"
-        try:
-            if os.path.exists(log_file):
-                with open(log_file, "r") as f:
-                    logs = json.load(f)
-            else:
-                logs = []
-            logs.append(trade_log_entry)
-            with open(log_file, "w") as f:
-                json.dump(logs, f, indent=4)
+            status_placeholder.info(f"🔎 Scanning {ticker}...")
+            data = yf.download(ticker, period="3mo", interval="1d", auto_adjust=True)
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = [col[0] for col in data.columns]
+            data.rename(columns=lambda x: str(x).capitalize(), inplace=True)
+
+            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            if not all(col in data.columns for col in required_cols):
+                continue
+
+            data = ta.add_all_ta_features(
+                data,
+                open="Open", high="High", low="Low", close="Close", volume="Volume",
+                fillna=True
+            )
+
+            latest = data.iloc[-1]
+            rsi = latest["momentum_rsi"]
+            stochrsi = latest["momentum_stoch_rsi"]
+            macd = latest["trend_macd"]
+            macd_signal = latest["trend_macd_signal"]
+            macd_hist = macd - macd_signal
+            ma20 = latest["trend_sma_fast"]
+            ma150 = latest["trend_sma_slow"]
+            close = latest["Close"]
+            bbm = latest["volatility_bbm"]
+            bbw = latest["volatility_bbw"]
+            bb_low = bbm - bbw
+            volume = latest["Volume"]
+            avg_volume = data["Volume"].rolling(window=20).mean().iloc[-1]
+            adx = latest["trend_adx"]
+
+            match = (
+                rsi < 35 and
+                stochrsi < 0.2 and
+                macd > macd_signal and
+                macd_hist > 0 and
+                close > ma150 and close < ma20 and
+                close <= bb_low and
+                volume > avg_volume and
+                adx > 20
+            )
+
+            if match:
+                trade = {
+                    "ticker": ticker,
+                    "rsi": round(rsi, 2),
+                    "stochrsi": round(stochrsi, 2),
+                    "macd_hist": round(macd_hist, 3),
+                    "close": round(close, 2),
+                    "ma20": round(ma20, 2),
+                    "ma150": round(ma150, 2),
+                    "volume": round(volume),
+                    "avg_volume": round(avg_volume),
+                    "adx": round(adx, 2)
+                }
+
+                prompt = f"""
+                You are an expert swing trader. Given the following data, write a 3-4 sentence recommendation:
+                - Ticker: {trade['ticker']}
+                - RSI: {trade['rsi']}
+                - Stochastic RSI: {trade['stochrsi']}
+                - MACD Histogram: {trade['macd_hist']}
+                - Close: {trade['close']}
+                - MA20: {trade['ma20']}
+                - MA150: {trade['ma150']}
+                - Volume: {trade['volume']} vs avg {trade['avg_volume']}
+                - ADX: {trade['adx']}
+
+                Include:
+                - Confidence level from 0% to 100%
+                - Suggested entry price (around close)
+                - Suggested target price
+                - Suggested stop loss
+                - Why this trade is attractive
+                """
+
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                gpt_output = response.choices[0].message.content
+                st.markdown(f"### 📈 {trade['ticker']}")
+                st.text(gpt_output)
+                high_confidence_trades.append(trade)
+                send_email(f"🔔 SniperBot Signal: {trade['ticker']}", gpt_output)
+
+                # ✅ Lock the trade
+                locked_positions[ticker] = {
+                    "entry_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "entry_price": float(close),
+                    "note": "Locked by model"
+                }
+                save_locked_positions()
+
         except Exception as e:
-            st.error(f"Failed to log trade: {e}")
+            st.warning(f"⚠️ {ticker} failed: {e}")
+
+    if not high_confidence_trades:
+        st.error("❌ No high-confidence trades found. Try again later.")
     else:
-        alert_placeholder.warning(f"No trades met the confidence threshold of {threshold}%.")
+        st.success("✅ High-confidence trade(s) found!")
