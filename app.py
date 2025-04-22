@@ -118,11 +118,10 @@ if trade_button:
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = [col[0] for col in data.columns]  # Flatten to single level
 
-            # Add the new indicators using the `ta` library
-            data['bbm'] = ta.volatility.bollinger_mavg(data['Close'])
-            data['bbw'] = ta.volatility.bollinger_width(data['Close'])
+            # Calculate Bollinger Bands manually
             data['bb_upper'] = ta.volatility.bollinger_hband(data['Close'])
             data['bb_lower'] = ta.volatility.bollinger_lband(data['Close'])
+            data['bb_width'] = data['bb_upper'] - data['bb_lower']  # Manual width calculation
 
             data['ATR'] = ta.volatility.average_true_range(data['High'], data['Low'], data['Close'], window=14)
             data['OBV'] = ta.volume.on_balance_volume(data['Close'], data['Volume'])
