@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Import backtest functions from backtest_tab.py
-from backtest_tab import backtest_tab  # <-- Correct import statement
+from backtest_tab import backtest_tab
 
 # Load from secrets
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -120,8 +120,15 @@ if trade_button:
 
             # Manually calculate RSI
             data['RSI'] = ta.momentum.rsi(data['Close'], window=14)
+            
+            # Debugging: Ensure RSI is being added to DataFrame
+            st.write(data[['Close', 'RSI']].tail())  # Display last few rows of Close and RSI
 
-            # Calculate Bollinger Bands manually (Fixing the bollinger_width issue)
+            if 'RSI' not in data.columns:
+                st.warning(f"RSI calculation failed for {ticker}")
+                continue
+
+            # Calculate other indicators as before
             data['bb_upper'] = ta.volatility.bollinger_hband(data['Close'])
             data['bb_lower'] = ta.volatility.bollinger_lband(data['Close'])
             data['bb_width'] = data['bb_upper'] - data['bb_lower']  # Manual width calculation
@@ -164,4 +171,46 @@ if trade_button:
 
                 # Send email and log trade details
                 prompt = f"""
-                You are an expert swing trader. Given the following data, write a 3-
+                You are an expert swing trader. Given the following data, write a 3-4 sentence recommendation:
+                - Ticker: {trade['ticker']}
+                - RSI: {trade['rsi']}
+                - MACD Histogram: {trade['macd_hist']}
+                - Close: {trade['close']}
+                - EMA9: {trade['ema9']}
+                - EMA21: {trade['ema21']}
+                - Volume: {trade['volume']}
+                - Bollinger Band Upper: {trade['bb_upper']}
+
+                Include:
+                - Confidence level from 0% to 100%
+                - Suggested entry price (around close)
+                - Suggested target price
+                - Suggested stop loss
+                - Why this trade is attractive
+                """
+
+                response = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                gpt_output = response.choices[0].message.content
+                st.markdown(f"### 📈 {trade['ticker']}")
+                st.text(gpt_output)
+                high_confidence_trades.append(trade)
+                send_email(f"🔔 SniperBot Signal: {trade['ticker']}", gpt_output)
+
+                # ✅ Lock the trade
+                locked_positions[ticker] = {
+                    "entry_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "entry_price": float(trade['close']),
+                    "note": "Locked by model"
+                }
+                save_locked_positions()
+
+        except Exception as e:
+            st.warning(f"⚠️ {ticker} failed: {e}")
+
+    if not high_confidence_trades:
+        st.error("❌ No high-confidence trades found. Try again later.")
+    else:
+        st.success("✅ High-confidence trade(s) found!")
