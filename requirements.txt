@@ -5,3 +5,4 @@ ta
 scikit-learn
 joblib
 openai==1.75.0
+matplotlib==3.7.0  # Example version
