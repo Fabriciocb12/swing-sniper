@@ -245,6 +245,27 @@ if trade_button:
                 high_confidence_trades.append(trade)
                 send_email(f"🔔 SniperBot Signal: {trade['ticker']}", gpt_output)
 
+                # ✅ Log trade data for learning
+                trade_data = {
+                    "ticker": ticker,
+                    "confidence": confidence_level,
+                    "entry_price": trade['close'],
+                    "rsi": trade['rsi'],
+                    "macd_hist": trade['macd_hist'],
+                    "ema9": trade['ema9'],
+                    "ema21": trade['ema21'],
+                    "bb_upper": trade['bb_upper'],
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                
+                # Save data to CSV and JSON
+                trade_data_df = pd.DataFrame([trade_data])
+                trade_data_df.to_csv("trade_signals.csv", mode="a", header=False, index=False)
+
+                with open("trade_signals.json", "a") as json_file:
+                    json.dump(trade_data, json_file)
+                    json_file.write("\n")
+
                 # ✅ Lock the trade
                 locked_positions[ticker] = {
                     "entry_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -260,3 +281,4 @@ if trade_button:
         st.error("❌ No high-confidence trades found. Try again later.")
     else:
         st.success("✅ High-confidence trade(s) found!")
+
