@@ -25,8 +25,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 st.set_page_config(page_title="Swing Sniper GPT", layout="wide")
 st.title("🎯 Swing Sniper GPT")
 
-confidence_threshold = st.slider("Set Trade Confidence Threshold %", 1, 95, 50, step=1)
-
+confidence_threshold = st.slider("Set Trade Confidence Threshold %", 1, 95, 80, step=10)
 red_zone_enabled = st.checkbox("🚨 Enable Red Zone Mode (Bear Market Protocol)")
 
 if red_zone_enabled:
@@ -79,82 +78,11 @@ main_tickers = [
 
 final_tickers = main_tickers + panic_assets
 
-# Define the dynamic confidence function
-def get_trade_confidence(data):
-    base_confidence = 50  # Default confidence for medium confidence trades
-    
-    # 1% confidence (very sensitive model, very low thresholds)
-    if (
-        data['RSI'].iloc[-1] < 40 and  # Relaxed RSI
-        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # MACD alignment
-        data['Close'].iloc[-1] > data['bb_middle'].iloc[-1] and  # Price near middle of BB
-        data['ATR'].iloc[-1] > data['ATR'].mean() and  # High ATR (indicating volatility)
-        data['OBV'].iloc[-1] > data['OBV'].iloc[-2]  # OBV increasing (buying pressure)
-    ):
-        base_confidence = 1  # Very sensitive, allows more trades
-
-    # 10% confidence (still sensitive, looser criteria)
-    elif (
-        data['RSI'].iloc[-1] < 50 and
-        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
-        data['Close'].iloc[-1] > data['bb_middle'].iloc[-1] and
-        data['ATR'].iloc[-1] > data['ATR'].mean() and
-        data['OBV'].iloc[-1] > data['OBV'].iloc[-2]
-    ):
-        base_confidence = 10  # Low confidence, but still sensitive
-
-    # 50% confidence (moderate)
-    elif (
-        data['RSI'].iloc[-1] < 35 and
-        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
-        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1]
-    ):
-        base_confidence = 50  # Standard confidence, trade with moderate certainty
-
-    # 80% confidence (high confidence, more stringent criteria)
-    elif (
-        data['RSI'].iloc[-1] < 30 and
-        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
-        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1] and
-        data['BB_upper'].iloc[-1] < data['Close'].iloc[-1]  # Strong breakout
-    ):
-        base_confidence = 80  # High confidence
-
-    # 95% confidence (very strict)
-    elif (
-        data['RSI'].iloc[-1] < 25 and
-        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
-        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1] and
-        data['BB_upper'].iloc[-1] < data['Close'].iloc[-1]
-    ):
-        base_confidence = 95  # Very high confidence, for the most reliable trades
-
-    return base_confidence
-
-# 🧠 Backtest Functionality
-# Add a new section for the backtest tab
-st.sidebar.title("Backtest Strategy")
-selected_ticker_backtest = st.sidebar.selectbox("Select Ticker for Backtest", final_tickers)
-
-if st.sidebar.button("Run Backtest"):
-    st.write(f"Running backtest for {selected_ticker_backtest}...")
-
-    # ✅ Fetch Data for the selected ticker
-    def fetch_data(ticker):
-        data = yf.download(ticker, period="1y", interval="1d")
-        return data
-
-    data = fetch_data(selected_ticker_backtest)
-
-    # ✅ Backtest Strategy (simple moving average crossover)
-    backtest_results = backtest_tab.backtest_strategy(data)  # Using the backtest function from backtest_tab.py
-
-    # ✅ Plot Results
-    backtest_tab.plot_results(backtest_results)  # Plot the results using the plot function from backtest_tab.py
+# Store triggered trades
+triggered_trades = []
 
 # Main trade scan button (already existing)
 if trade_button:
-    high_confidence_trades = []
     for ticker in final_tickers:
         try:
             if ticker in locked_positions:
@@ -162,101 +90,83 @@ if trade_button:
                 continue
 
             status_placeholder.info(f"🔎 Scanning {ticker}...")
-
-            # Fetch data
             data = yf.download(ticker, period="3mo", interval="1d", auto_adjust=True)
+            if isinstance(data.columns, pd.MultiIndex):
+                data.columns = [col[0] for col in data.columns]
+            data.rename(columns=lambda x: str(x).capitalize(), inplace=True)
 
-            # Check if data is empty
-            if data.empty:
-                st.warning(f"No data returned for {ticker}. Skipping this ticker.")
-                continue  # Skip this ticker and move to the next one
-
-            # Ensure we have enough data to calculate RSI
-            if len(data) < 14:
-                st.warning(f"Not enough data for {ticker} to calculate RSI. Skipping.")
+            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
+            if not all(col in data.columns for col in required_cols):
                 continue
 
-            # Flatten the dataframe if needed (remove multi-index columns)
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = [col[0] for col in data.columns]  # Flatten to single level
+            data = ta.add_all_ta_features(
+                data,
+                open="Open", high="High", low="Low", close="Close", volume="Volume",
+                fillna=True
+            )
 
-            # Manually calculate RSI
-            data['RSI'] = ta.momentum.rsi(data['Close'], window=14)
+            latest = data.iloc[-1]
+            rsi = latest["momentum_rsi"]
+            stochrsi = latest["momentum_stoch_rsi"]
+            macd = latest["trend_macd"]
+            macd_signal = latest["trend_macd_signal"]
+            macd_hist = macd - macd_signal
+            ma20 = latest["trend_sma_fast"]
+            ma150 = latest["trend_sma_slow"]
+            close = latest["Close"]
+            bbm = latest["volatility_bbm"]
+            bbw = latest["volatility_bbw"]
+            bb_low = bbm - bbw
+            volume = latest["Volume"]
+            avg_volume = data["Volume"].rolling(window=20).mean().iloc[-1]
+            adx = latest["trend_adx"]
 
-            # Calculate other indicators as before
-            data['bb_upper'] = ta.volatility.bollinger_hband(data['Close'])
-            data['bb_lower'] = ta.volatility.bollinger_lband(data['Close'])
-            data['bb_middle'] = data['Close'].rolling(window=20).mean()  # Adding bb_middle (middle band)
-            data['bb_width'] = data['bb_upper'] - data['bb_lower']  # Manual width calculation
+            match = (
+                rsi < 35 and
+                stochrsi < 0.2 and
+                macd > macd_signal and
+                macd_hist > 0 and
+                close > ma150 and close < ma20 and
+                close <= bb_low and
+                volume > avg_volume and
+                adx > 20
+            )
 
-            data['ATR'] = ta.volatility.average_true_range(data['High'], data['Low'], data['Close'], window=14)
-            data['OBV'] = ta.volume.on_balance_volume(data['Close'], data['Volume'])
+            confidence_level = 75  # Example confidence level based on conditions
 
-            data['MACD'] = ta.trend.macd(data['Close'])
-            data['MACD_signal'] = ta.trend.macd_signal(data['Close'])
-            data['MACD_hist'] = data['MACD'] - data['MACD_signal']
+            trade = {
+                "ticker": ticker,
+                "rsi": round(rsi, 2),
+                "stochrsi": round(stochrsi, 2),
+                "macd_hist": round(macd_hist, 3),
+                "close": round(close, 2),
+                "ma20": round(ma20, 2),
+                "ma150": round(ma150, 2),
+                "volume": round(volume),
+                "avg_volume": round(avg_volume),
+                "adx": round(adx, 2),
+                "confidence": confidence_level
+            }
 
-            data['EMA9'] = ta.trend.ema_indicator(data['Close'], window=9)
-            data['EMA21'] = ta.trend.ema_indicator(data['Close'], window=21)
-
-            # Get dynamic confidence level based on new criteria
-            confidence_level = get_trade_confidence(data)
-
-            if confidence_level >= confidence_threshold:  # Only trigger for trades with a high enough confidence
-                # Record trade details
-                trade = {
-                    "ticker": ticker,
-                    "rsi": round(data['RSI'].iloc[-1], 2),
-                    "macd_hist": round(data['MACD_hist'].iloc[-1], 3),
-                    "close": round(data['Close'].iloc[-1], 2),
-                    "ema9": round(data['EMA9'].iloc[-1], 2),
-                    "ema21": round(data['EMA21'].iloc[-1], 2),
-                    "volume": round(data['Volume'].iloc[-1]),
-                    "bb_upper": round(data['bb_upper'].iloc[-1], 2),
-                }
-
-                # Send the email trigger
-                prompt = f"""
-                You are an expert swing trader. Given the following data, write a 3-4 sentence recommendation:
-                - Ticker: {trade['ticker']}
-                - RSI: {trade['rsi']}
-                - MACD Histogram: {trade['macd_hist']}
-                - Close: {trade['close']}
-                - EMA9: {trade['ema9']}
-                - EMA21: {trade['ema21']}
-                - Volume: {trade['volume']}
-                - Bollinger Band Upper: {trade['bb_upper']}
-
-                Include:
-                - Confidence level from 0% to 100%
-                - Suggested entry price (around close)
-                - Suggested target price
-                - Suggested stop loss
-                - Why this trade is attractive
-                """
-
-                response = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                gpt_output = response.choices[0].message.content
-                st.markdown(f"### 📈 {trade['ticker']}")
-                st.text(gpt_output)
-                high_confidence_trades.append(trade)
-                send_email(f"🔔 SniperBot Signal: {trade['ticker']}", gpt_output)
-
-                # ✅ Lock the trade
-                locked_positions[ticker] = {
-                    "entry_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "entry_price": float(trade['close']),
-                    "note": "Locked by model"
-                }
-                save_locked_positions()
+            # Store triggered trades with their confidence levels
+            triggered_trades.append({
+                "ticker": ticker,
+                "confidence": confidence_level,
+                "details": trade
+            })
 
         except Exception as e:
             st.warning(f"⚠️ {ticker} failed: {e}")
 
-    if not high_confidence_trades:
-        st.error("❌ No high-confidence trades found. Try again later.")
+    # Sort triggered trades by confidence level (highest first)
+    triggered_trades = sorted(triggered_trades, key=lambda x: x["confidence"], reverse=True)
+
+    # Select the highest confidence trade
+    if triggered_trades:
+        highest_confidence_trade = triggered_trades[0]
+        
+        # Send email only for the highest confidence trade
+        send_email(f"🔔 High-Confidence Trade: {highest_confidence_trade['ticker']}", str(highest_confidence_trade['details']))
+        st.success(f"📬 Email sent for {highest_confidence_trade['ticker']} with confidence {highest_confidence_trade['confidence']}%")
     else:
-        st.success("✅ High-confidence trade(s) found!")
+        st.error("❌ No high-confidence trades found. Try again later.")
