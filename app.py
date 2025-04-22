@@ -247,3 +247,4 @@ if trade_button:
         st.error("❌ No high-confidence trades found. Try again later.")
     else:
         st.success("✅ High-confidence trade(s) found!")
+
