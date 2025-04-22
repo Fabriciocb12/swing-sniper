@@ -25,10 +25,11 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 st.set_page_config(page_title="Swing Sniper GPT", layout="wide")
 st.title("🎯 Swing Sniper GPT")
 
+# UI for confidence level slider
 confidence_threshold = st.slider("Set Trade Confidence Threshold %", 1, 95, 50, step=1)
 
+# Red Zone Mode (Bear Market Protocol)
 red_zone_enabled = st.checkbox("🚨 Enable Red Zone Mode (Bear Market Protocol)")
-
 if red_zone_enabled:
     st.markdown("### 🔴 Red Zone Mode: ON")
     panic_assets = ["IAU", "GLD", "SDS", "SH", "RWM", "VIXY", "UVXY", "TLT", "BIL", "SHY"]
@@ -36,10 +37,11 @@ else:
     st.markdown("### 🟢 Red Zone Mode: OFF")
     panic_assets = []
 
+# Trade scan button
 trade_button = st.button("🔍 Scan for Trades")
 status_placeholder = st.empty()
 
-# ✅ Email Sender
+# Email Sender Function
 def send_email(subject, body):
     try:
         msg = MIMEText(body)
@@ -54,7 +56,7 @@ def send_email(subject, body):
     except Exception as e:
         st.error(f"📪 Email failed: {e}")
 
-# ✅ Load Locked Positions from JSON
+# Load Locked Positions from JSON
 LOCK_FILE = "locked_positions.json"
 if os.path.exists(LOCK_FILE):
     with open(LOCK_FILE, "r") as f:
@@ -62,28 +64,25 @@ if os.path.exists(LOCK_FILE):
 else:
     locked_positions = {}
 
-# ✅ Save Locked Positions to JSON
+# Save Locked Positions to JSON
 def save_locked_positions():
     with open(LOCK_FILE, "w") as f:
         json.dump(locked_positions, f, indent=2)
 
-# Tickers
+# Tickers list
 main_tickers = [
     "AAPL", "TSLA", "NVDA", "AMD", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "SHOP",
-    "WMT", "PEP", "KO", "CVS", "JNJ", "PG", "XOM", "VZ", "O",
-    "JEPQ", "JEPI", "RYLD", "QYLD", "SCHD", "VYM", "DVY", "HDV",
-    "QQQ", "SPY", "VOO", "IWM", "ARKK", "XLF", "XLE", "XLV", "XLC",
-    "EWZ", "EEM", "FXI", "EWJ", "IBB",
-    "BTC-USD", "ETH-USD"
+    "WMT", "PEP", "KO", "CVS", "JNJ", "PG", "XOM", "VZ", "O", "JEPQ", "JEPI", "RYLD", 
+    "QYLD", "SCHD", "VYM", "DVY", "HDV", "QQQ", "SPY", "VOO", "IWM", "ARKK", "XLF", 
+    "XLE", "XLV", "XLC", "EWZ", "EEM", "FXI", "EWJ", "IBB", "BTC-USD", "ETH-USD"
 ]
-
 final_tickers = main_tickers + panic_assets
 
-# Define the dynamic confidence function
+# Dynamic Confidence Logic (Updated)
 def get_trade_confidence(data):
     base_confidence = 50  # Default confidence for medium confidence trades
     
-    # 1% confidence (very sensitive model, very low thresholds)
+    # 1% confidence (very sensitive model)
     if (
         data['RSI'].iloc[-1] < 40 and  # Relaxed RSI
         data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # MACD alignment
@@ -91,9 +90,10 @@ def get_trade_confidence(data):
         data['ATR'].iloc[-1] > data['ATR'].mean() and  # High ATR (indicating volatility)
         data['OBV'].iloc[-1] > data['OBV'].iloc[-2]  # OBV increasing (buying pressure)
     ):
-        base_confidence = 1  # Very sensitive, allows more trades
+        print("1% confidence triggered")
+        base_confidence = 1
 
-    # 10% confidence (still sensitive, looser criteria)
+    # 10% confidence (looser criteria)
     elif (
         data['RSI'].iloc[-1] < 50 and
         data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
@@ -101,24 +101,27 @@ def get_trade_confidence(data):
         data['ATR'].iloc[-1] > data['ATR'].mean() and
         data['OBV'].iloc[-1] > data['OBV'].iloc[-2]
     ):
-        base_confidence = 10  # Low confidence, but still sensitive
+        print("10% confidence triggered")
+        base_confidence = 10
 
-    # 50% confidence (moderate)
+    # 50% confidence (moderate confidence)
     elif (
         data['RSI'].iloc[-1] < 35 and
         data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
         data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1]
     ):
-        base_confidence = 50  # Standard confidence, trade with moderate certainty
+        print("50% confidence triggered")
+        base_confidence = 50
 
-    # 80% confidence (high confidence, more stringent criteria)
+    # 80% confidence (high confidence)
     elif (
         data['RSI'].iloc[-1] < 30 and
         data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
         data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1] and
         data['BB_upper'].iloc[-1] < data['Close'].iloc[-1]  # Strong breakout
     ):
-        base_confidence = 80  # High confidence
+        print("80% confidence triggered")
+        base_confidence = 80
 
     # 95% confidence (very strict)
     elif (
@@ -127,11 +130,13 @@ def get_trade_confidence(data):
         data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1] and
         data['BB_upper'].iloc[-1] < data['Close'].iloc[-1]
     ):
-        base_confidence = 95  # Very high confidence, for the most reliable trades
+        print("95% confidence triggered")
+        base_confidence = 95
 
+    print(f"Confidence level: {base_confidence}%")  # Debug print for confidence
     return base_confidence
 
-# 🧠 Backtest Functionality
+# 🧠 Backtest Functionality (Restored)
 # Add a new section for the backtest tab
 st.sidebar.title("Backtest Strategy")
 selected_ticker_backtest = st.sidebar.selectbox("Select Ticker for Backtest", final_tickers)
@@ -152,7 +157,7 @@ if st.sidebar.button("Run Backtest"):
     # ✅ Plot Results
     backtest_tab.plot_results(backtest_results)  # Plot the results using the plot function from backtest_tab.py
 
-# Main trade scan button (already existing)
+# Main trade scan button
 if trade_button:
     high_confidence_trades = []
     for ticker in final_tickers:
@@ -171,11 +176,6 @@ if trade_button:
                 st.warning(f"No data returned for {ticker}. Skipping this ticker.")
                 continue  # Skip this ticker and move to the next one
 
-            # Ensure we have enough data to calculate RSI
-            if len(data) < 14:
-                st.warning(f"Not enough data for {ticker} to calculate RSI. Skipping.")
-                continue
-
             # Flatten the dataframe if needed (remove multi-index columns)
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = [col[0] for col in data.columns]  # Flatten to single level
@@ -183,7 +183,7 @@ if trade_button:
             # Manually calculate RSI
             data['RSI'] = ta.momentum.rsi(data['Close'], window=14)
 
-            # Calculate other indicators as before
+            # Calculate other indicators
             data['bb_upper'] = ta.volatility.bollinger_hband(data['Close'])
             data['bb_lower'] = ta.volatility.bollinger_lband(data['Close'])
             data['bb_middle'] = data['Close'].rolling(window=20).mean()  # Adding bb_middle (middle band)
