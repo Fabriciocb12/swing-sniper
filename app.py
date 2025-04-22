@@ -113,27 +113,6 @@ def get_trade_confidence(data):
 
     return base_confidence
 
-# 🧠 Backtest Functionality
-# Add a new section for the backtest tab
-st.sidebar.title("Backtest Strategy")
-selected_ticker_backtest = st.sidebar.selectbox("Select Ticker for Backtest", final_tickers)
-
-if st.sidebar.button("Run Backtest"):
-    st.write(f"Running backtest for {selected_ticker_backtest}...")
-
-    # ✅ Fetch Data for the selected ticker
-    def fetch_data(ticker):
-        data = yf.download(ticker, period="1y", interval="1d")
-        return data
-
-    data = fetch_data(selected_ticker_backtest)
-
-    # ✅ Backtest Strategy (simple moving average crossover)
-    backtest_results = backtest_tab.backtest_strategy(data)  # Using the backtest function from backtest_tab.py
-
-    # ✅ Plot Results
-    backtest_tab.plot_results(backtest_results)  # Plot the results using the plot function from backtest_tab.py
-
 # Main trade scan button (already existing)
 if trade_button:
     high_confidence_trades = []
@@ -145,7 +124,18 @@ if trade_button:
 
             status_placeholder.info(f"🔎 Scanning {ticker}...")
 
+            # Fetch data
             data = yf.download(ticker, period="3mo", interval="1d", auto_adjust=True)
+
+            # Check if data is empty
+            if data.empty:
+                st.warning(f"No data returned for {ticker}. Skipping this ticker.")
+                continue  # Skip this ticker and move to the next one
+
+            # Ensure we have enough data to calculate RSI
+            if len(data) < 14:
+                st.warning(f"Not enough data for {ticker} to calculate RSI. Skipping.")
+                continue
 
             # Flatten the dataframe if needed (remove multi-index columns)
             if isinstance(data.columns, pd.MultiIndex):
@@ -247,4 +237,3 @@ if trade_button:
         st.error("❌ No high-confidence trades found. Try again later.")
     else:
         st.success("✅ High-confidence trade(s) found!")
-
