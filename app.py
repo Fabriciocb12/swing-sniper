@@ -25,7 +25,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 st.set_page_config(page_title="Swing Sniper GPT", layout="wide")
 st.title("🎯 Swing Sniper GPT")
 
-confidence_threshold = st.slider("Set Trade Confidence Threshold %", 1, 95, 80, step=1)
+confidence_threshold = st.slider("Set Trade Confidence Threshold %", 1, 95, 50, step=1)
 
 red_zone_enabled = st.checkbox("🚨 Enable Red Zone Mode (Bear Market Protocol)")
 
@@ -131,6 +131,27 @@ def get_trade_confidence(data):
 
     return base_confidence
 
+# 🧠 Backtest Functionality
+# Add a new section for the backtest tab
+st.sidebar.title("Backtest Strategy")
+selected_ticker_backtest = st.sidebar.selectbox("Select Ticker for Backtest", final_tickers)
+
+if st.sidebar.button("Run Backtest"):
+    st.write(f"Running backtest for {selected_ticker_backtest}...")
+
+    # ✅ Fetch Data for the selected ticker
+    def fetch_data(ticker):
+        data = yf.download(ticker, period="1y", interval="1d")
+        return data
+
+    data = fetch_data(selected_ticker_backtest)
+
+    # ✅ Backtest Strategy (simple moving average crossover)
+    backtest_results = backtest_tab.backtest_strategy(data)  # Using the backtest function from backtest_tab.py
+
+    # ✅ Plot Results
+    backtest_tab.plot_results(backtest_results)  # Plot the results using the plot function from backtest_tab.py
+
 # Main trade scan button (already existing)
 if trade_button:
     high_confidence_trades = []
@@ -194,7 +215,7 @@ if trade_button:
                     "bb_upper": round(data['bb_upper'].iloc[-1], 2),
                 }
 
-                # Send email and log trade details
+                # Send the email trigger
                 prompt = f"""
                 You are an expert swing trader. Given the following data, write a 3-4 sentence recommendation:
                 - Ticker: {trade['ticker']}
