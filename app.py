@@ -25,7 +25,6 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 st.set_page_config(page_title="Swing Sniper GPT", layout="wide")
 st.title("🎯 Swing Sniper GPT")
 
-# Adjust the confidence threshold slider to include 30% and 40%
 confidence_threshold = st.slider("Set Trade Confidence Threshold %", 30, 95, 80, step=10)
 
 red_zone_enabled = st.checkbox("🚨 Enable Red Zone Mode (Bear Market Protocol)")
@@ -86,9 +85,9 @@ def get_trade_confidence(data):
     
     # Low confidence (30-40% confidence for riskier trades)
     if (
-        data['RSI'].iloc[-1] < 50 and  # Loosen RSI condition (below 50)
-        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # MACD above signal line
-        data['Close'].iloc[-1] > data['bb_upper'].iloc[-1] and  # Breakout above upper Bollinger Band
+        data['RSI'].iloc[-1] < 50 and  # Loosen RSI condition (below 50 for lower confidence)
+        data['MACD'].iloc[-1] >= data['MACD_signal'].iloc[-1] and  # MACD greater than or equal to signal line for low confidence
+        data['Close'].iloc[-1] > data['bb_middle'].iloc[-1] and  # Crossing above middle Bollinger Band
         data['ATR'].iloc[-1] > data['ATR'].mean() and  # High ATR (indicating higher volatility)
         data['OBV'].iloc[-1] > data['OBV'].iloc[-2]  # Increasing OBV (buying pressure)
     ):
@@ -144,9 +143,7 @@ if trade_button:
             # Manually calculate RSI
             data['RSI'] = ta.momentum.rsi(data['Close'], window=14)
 
-            # Debugging: Ensure RSI is being added to DataFrame
-            st.write(data[['Close', 'RSI']].tail())  # Display last few rows of Close and RSI
-
+            # Ensure RSI is being added to DataFrame
             if 'RSI' not in data.columns:
                 st.warning(f"RSI calculation failed for {ticker}")
                 continue
@@ -171,11 +168,11 @@ if trade_button:
 
             # Evaluate trade criteria (loosened conditions for 30-40% confidence range)
             match = False
-            rsi_condition = data['RSI'].iloc[-1] < 50  # Loosened RSI condition (below 50)
-            macd_condition = data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1]  # MACD above signal line
-            bollinger_condition = data['Close'].iloc[-1] > data['bb_upper'].iloc[-1]  # Breakout above upper Bollinger Band
-            atr_condition = data['ATR'].iloc[-1] > data['ATR'].mean()  # High ATR (indicating higher volatility)
-            obv_condition = data['OBV'].iloc[-1] > data['OBV'].iloc[-2]  # Increasing OBV (buying pressure)
+            rsi_condition = data['RSI'].iloc[-1] < 50
+            macd_condition = data['MACD'].iloc[-1] >= data['MACD_signal'].iloc[-1]
+            bollinger_condition = data['Close'].iloc[-1] > data['bb_middle'].iloc[-1]
+            atr_condition = data['ATR'].iloc[-1] > data['ATR'].mean()
+            obv_condition = data['OBV'].iloc[-1] > data['OBV'].iloc[-2]
 
             # Print each condition for debugging
             st.write(f"RSI condition: {rsi_condition}")
@@ -184,7 +181,6 @@ if trade_button:
             st.write(f"ATR condition: {atr_condition}")
             st.write(f"OBV condition: {obv_condition}")
 
-            # Combine all conditions for the match
             match = rsi_condition and macd_condition and bollinger_condition and atr_condition and obv_condition
 
             if match:
@@ -244,3 +240,4 @@ if trade_button:
         st.error("❌ No high-confidence trades found. Try again later.")
     else:
         st.success("✅ High-confidence trade(s) found!")
+
