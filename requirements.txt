@@ -5,4 +5,5 @@ ta
 scikit-learn
 joblib
 openai==1.75.0
-matplotlib==3.7.0  # Example version
+numpy==1.24.0  # Adjust version if needed
+matplotlib==3.7.0  # Adjust version if needed
