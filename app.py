@@ -1,3 +1,8 @@
+# ✅ app.py: Fully upgraded with model integration, JSON state tracking, and email alerts
+
+import os
+import json
+import joblib
 import yfinance as yf
 import pandas as pd
 import ta
@@ -5,16 +10,34 @@ import streamlit as st
 import smtplib
 from email.mime.text import MIMEText
 from openai import OpenAI
-import os
 
-# Load from secrets
+# ✅ Load environment variables
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 EMAIL_SENDER = os.getenv("EMAIL_SENDER")
 EMAIL_PASSWORD = os.getenv("EMAIL_PASSWORD")
 EMAIL_RECEIVER = os.getenv("EMAIL_RECEIVER")
 
+# ✅ Load trained models
+entry_model = joblib.load("swing_sniper_model.pkl")
+exit_model = joblib.load("swing_sniper_exit_model_v2.pkl")
+
+# ✅ Load lock file
+LOCK_FILE = "locked_positions.json"
+if not os.path.exists(LOCK_FILE):
+    with open(LOCK_FILE, "w") as f:
+        json.dump({"positions": []}, f)
+
+def load_locks():
+    with open(LOCK_FILE, "r") as f:
+        return json.load(f)
+
+def save_locks(state):
+    with open(LOCK_FILE, "w") as f:
+        json.dump(state, f, indent=2)
+
 client = OpenAI(api_key=OPENAI_API_KEY)
 
+# ✅ Streamlit UI
 st.set_page_config(page_title="Swing Sniper GPT", layout="wide")
 st.title("🎯 Swing Sniper GPT")
 
@@ -47,7 +70,7 @@ def send_email(subject, body):
     except Exception as e:
         st.error(f"📪 Email failed: {e}")
 
-# Tickers
+# ✅ Main Ticker List
 main_tickers = [
     "AAPL", "TSLA", "NVDA", "AMD", "MSFT", "AMZN", "GOOGL", "META", "NFLX", "SHOP",
     "WMT", "PEP", "KO", "CVS", "JNJ", "PG", "XOM", "VZ", "O",
@@ -58,135 +81,75 @@ main_tickers = [
 ]
 
 final_tickers = main_tickers + panic_assets
+lock_state = load_locks()
 
 if trade_button:
-    high_confidence_trades = []
+    active_trades = []
     for ticker in final_tickers:
         try:
-            status_placeholder.info(f"🔎 Scanning {ticker}...")
+            status_placeholder.info(f"📊 Scanning {ticker}...")
             data = yf.download(ticker, period="3mo", interval="1d", auto_adjust=True)
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = [col[0] for col in data.columns]
-            data.rename(columns=lambda x: str(x).capitalize(), inplace=True)
-
-            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-            if not all(col in data.columns for col in required_cols):
+            if data is None or data.empty:
                 continue
 
-            data = ta.add_all_ta_features(
-                data,
-                open="Open", high="High", low="Low", close="Close", volume="Volume",
-                fillna=True
-            )
+            df = data.copy()
+            df = df.dropna()
+            df["rsi"] = ta.momentum.RSIIndicator(df["Close"]).rsi()
+            df["stoch_rsi"] = ta.momentum.StochRSIIndicator(df["Close"]).stochrsi()
+            df["hma"] = df["Close"].rolling(window=21).mean()
+            df["hma_breakout"] = df["Close"] > df["hma"]
+            df["smo"] = df["Close"] - ta.volatility.BollingerBands(df["Close"]).bollinger_mavg()
 
-            latest = data.iloc[-1]
-            rsi = latest["momentum_rsi"]
-            stochrsi = latest["momentum_stoch_rsi"]
-            macd = latest["trend_macd"]
-            macd_signal = latest["trend_macd_signal"]
-            macd_hist = macd - macd_signal
-            ma20 = latest["trend_sma_fast"]
-            ma150 = latest["trend_sma_slow"]
-            close = latest["Close"]
-            bbm = latest["volatility_bbm"]
-            bbw = latest["volatility_bbw"]
-            bb_low = bbm - bbw
-            volume = latest["Volume"]
-            avg_volume = data["Volume"].rolling(window=20).mean().iloc[-1]
-            adx = latest["trend_adx"]
+            latest = df.iloc[-1]
+            features = pd.DataFrame([{
+                "rsi": latest["rsi"],
+                "stoch_rsi": latest["stoch_rsi"],
+                "hma_breakout": int(latest["hma_breakout"]),
+                "smo": latest["smo"]
+            }])
 
-            match = (
-                rsi < 35 and
-                stochrsi < 0.2 and
-                macd > macd_signal and
-                macd_hist > 0 and
-                close > ma150 and close < ma20 and
-                close <= bb_low and
-                volume > avg_volume and
-                adx > 20
-            )
+            prediction = entry_model.predict(features)[0]
 
-            if match:
-                trade = {
-                    "ticker": ticker,
-                    "rsi": round(rsi, 2),
-                    "stochrsi": round(stochrsi, 2),
-                    "macd_hist": round(macd_hist, 3),
-                    "close": round(close, 2),
-                    "ma20": round(ma20, 2),
-                    "ma150": round(ma150, 2),
-                    "volume": round(volume),
-                    "avg_volume": round(avg_volume),
-                    "adx": round(adx, 2)
-                }
+            if prediction == 1 and ticker not in lock_state["positions"]:
+                # ✅ Entry Signal
+                st.success(f"✅ Entry Signal: {ticker}")
+                lock_state["positions"].append(ticker)
+                save_locks(lock_state)
 
-                prompt = f"""
-                You are an expert swing trader. Given the following data, write a 3-4 sentence recommendation:
-                - Ticker: {trade['ticker']}
-                - RSI: {trade['rsi']}
-                - Stochastic RSI: {trade['stochrsi']}
-                - MACD Histogram: {trade['macd_hist']}
-                - Close: {trade['close']}
-                - MA20: {trade['ma20']}
-                - MA150: {trade['ma150']}
-                - Volume: {trade['volume']} vs avg {trade['avg_volume']}
-                - ADX: {trade['adx']}
+                send_email(f"🔔 Entry Signal: {ticker}", f"Swing Sniper GPT recommends entering {ticker} today.")
+            elif ticker in lock_state["positions"]:
+                # ✅ Exit Model Check
+                exit_prediction = exit_model.predict(features)[0]
+                if exit_prediction == 1:
+                    st.warning(f"🔻 Exit Signal: {ticker}")
+                    lock_state["positions"].remove(ticker)
+                    save_locks(lock_state)
 
-                Include:
-                - Confidence level from 0% to 100%
-                - Suggested entry price (around close)
-                - Suggested target price
-                - Suggested stop loss
-                - Why this trade is attractive
-                """
-
-                response = client.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                gpt_output = response.choices[0].message.content
-                st.markdown(f"### 📈 {trade['ticker']}")
-                st.text(gpt_output)
-                high_confidence_trades.append(trade)
-                send_email(f"🔔 SniperBot Signal: {trade['ticker']}", gpt_output)
+                    send_email(f"🔻 Exit Signal: {ticker}", f"Swing Sniper GPT recommends exiting {ticker} today.")
 
         except Exception as e:
-            st.warning(f"⚠️ {ticker} failed: {e}")
+            st.error(f"⚠️ Error with {ticker}: {e}")
 
-    if not high_confidence_trades:
-        st.error("❌ No high-confidence trades found. Try again later.")
+    if not lock_state["positions"]:
+        st.info("ℹ️ No active swing trades in lock.")
     else:
-        st.success("✅ High-confidence trade(s) found!")
+        st.markdown("### 🔒 Currently Locked Positions:")
+        st.write(lock_state["positions"])
 
-    # GPT Sector Outlook
-    with st.expander("🧠 Sector Sentiment Snapshot"):
-        sector_prompt = """
-        Act as a financial analyst. Evaluate current macroeconomic trends and sector outlooks for swing traders. 
-        Assess likely strength/weakness across these sectors based on news, economic indicators, and seasonality:
-        - Technology
-        - Healthcare
-        - Financials
-        - Energy
-        - Consumer Staples
-        - Consumer Discretionary
-        - Communication Services
-        - Industrials
-        - Real Estate
-        - Materials
-        - Utilities
-        - Crypto
-        - Commodities
-
-        For each sector, write 1 sentence with current strength (+, -, or ~) and brief reasoning.
-        Then give a 4-line summary of the best opportunities.
+# ✅ GPT Sector Analysis
+with st.expander("🧠 Sector Sentiment Snapshot"):
+    try:
+        gpt_prompt = """
+        Act as a market strategist. Analyze macro trends, earnings, seasonality, and technicals.
+        Briefly rate each sector: + (bullish), - (bearish), ~ (neutral).
+        Summarize top 3 opportunities.
         """
-        try:
-            sector_response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": sector_prompt}]
-            )
-            summary = sector_response.choices[0].message.content
-            st.text_area("GPT Sector Analysis", value=summary, height=300)
-            send_email("🧠 GPT Sector Snapshot", summary)
-        except Exception as e:
-            st.error(f"⚠️ Sector GPT error: {e}")
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": gpt_prompt}]
+        )
+        summary = response.choices[0].message.content
+        st.text_area("GPT Sector Analysis", value=summary, height=300)
+        send_email("📊 Sector Sentiment Snapshot", summary)
+    except Exception as e:
+        st.error(f"❌ GPT Error: {e}")
