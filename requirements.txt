@@ -6,4 +6,5 @@ yfinance==0.2.55
 ta==0.11.0
 schedule==1.2.1
 flask==2.2.5
+streamlit
 
