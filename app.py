@@ -25,7 +25,7 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 st.set_page_config(page_title="Swing Sniper GPT", layout="wide")
 st.title("🎯 Swing Sniper GPT")
 
-confidence_threshold = st.slider("Set Trade Confidence Threshold %", 30, 95, 80, step=10)
+confidence_threshold = st.slider("Set Trade Confidence Threshold %", 1, 95, 80, step=1)
 
 red_zone_enabled = st.checkbox("🚨 Enable Red Zone Mode (Bear Market Protocol)")
 
@@ -83,32 +83,51 @@ final_tickers = main_tickers + panic_assets
 def get_trade_confidence(data):
     base_confidence = 50  # Default confidence for medium confidence trades
     
-    # Low confidence (30-40% confidence for riskier trades)
+    # 1% confidence (very sensitive model, very low thresholds)
     if (
-        data['RSI'].iloc[-1] < 50 and  # Loosen RSI condition (below 50 for lower confidence)
-        data['MACD'].iloc[-1] >= data['MACD_signal'].iloc[-1] and  # MACD greater than or equal to signal line for low confidence
-        data['Close'].iloc[-1] > data['bb_middle'].iloc[-1] and  # Crossing above middle Bollinger Band
-        data['ATR'].iloc[-1] > data['ATR'].mean() and  # High ATR (indicating higher volatility)
-        data['OBV'].iloc[-1] > data['OBV'].iloc[-2]  # Increasing OBV (buying pressure)
+        data['RSI'].iloc[-1] < 40 and  # Relaxed RSI
+        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # MACD alignment
+        data['Close'].iloc[-1] > data['bb_middle'].iloc[-1] and  # Price near middle of BB
+        data['ATR'].iloc[-1] > data['ATR'].mean() and  # High ATR (indicating volatility)
+        data['OBV'].iloc[-1] > data['OBV'].iloc[-2]  # OBV increasing (buying pressure)
     ):
-        base_confidence = 30  # Low confidence for riskier trades
+        base_confidence = 1  # Very sensitive, allows more trades
 
-    # Medium confidence (50-70% confidence for standard trades)
+    # 10% confidence (still sensitive, looser criteria)
     elif (
-        data['RSI'].iloc[-1] < 35 and  # Stronger oversold condition
-        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # Strong MACD alignment
-        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1]  # EMA9 above EMA21 for stronger momentum
+        data['RSI'].iloc[-1] < 50 and
+        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
+        data['Close'].iloc[-1] > data['bb_middle'].iloc[-1] and
+        data['ATR'].iloc[-1] > data['ATR'].mean() and
+        data['OBV'].iloc[-1] > data['OBV'].iloc[-2]
     ):
-        base_confidence = 60  # Medium confidence for standard trades
+        base_confidence = 10  # Low confidence, but still sensitive
 
-    # High confidence (80-90% confidence for stricter trades)
+    # 50% confidence (moderate)
     elif (
-        data['RSI'].iloc[-1] < 30 and  # Very strong oversold condition
-        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # Very strong MACD alignment
-        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1] and  # EMA9 above EMA21
-        data['BB_upper'].iloc[-1] < data['Close'].iloc[-1]  # Strong breakout above the upper Bollinger Band
+        data['RSI'].iloc[-1] < 35 and
+        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
+        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1]
     ):
-        base_confidence = 90  # High confidence for the strongest trades
+        base_confidence = 50  # Standard confidence, trade with moderate certainty
+
+    # 80% confidence (high confidence, more stringent criteria)
+    elif (
+        data['RSI'].iloc[-1] < 30 and
+        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
+        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1] and
+        data['BB_upper'].iloc[-1] < data['Close'].iloc[-1]  # Strong breakout
+    ):
+        base_confidence = 80  # High confidence
+
+    # 95% confidence (very strict)
+    elif (
+        data['RSI'].iloc[-1] < 25 and
+        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
+        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1] and
+        data['BB_upper'].iloc[-1] < data['Close'].iloc[-1]
+    ):
+        base_confidence = 95  # Very high confidence, for the most reliable trades
 
     return base_confidence
 
@@ -160,25 +179,10 @@ if trade_button:
             data['EMA21'] = ta.trend.ema_indicator(data['Close'], window=21)
 
             # Get dynamic confidence level based on new criteria
-            confidence_threshold = get_trade_confidence(data)
+            confidence_level = get_trade_confidence(data)
 
-            # Evaluate trade criteria (loosened conditions for 30-40% confidence range)
-            match = False
-            rsi_condition = data['RSI'].iloc[-1] < 50
-            macd_condition = data['MACD'].iloc[-1] >= data['MACD_signal'].iloc[-1]
-            bollinger_condition = data['Close'].iloc[-1] > data['bb_middle'].iloc[-1]
-            atr_condition = data['ATR'].iloc[-1] > data['ATR'].mean()
-            obv_condition = data['OBV'].iloc[-1] > data['OBV'].iloc[-2]
-
-            # Print each condition for debugging
-            if match:
-                st.write(f"RSI condition: {rsi_condition}")
-                st.write(f"MACD condition: {macd_condition}")
-                st.write(f"Bollinger condition: {bollinger_condition}")
-                st.write(f"ATR condition: {atr_condition}")
-                st.write(f"OBV condition: {obv_condition}")
-
-            if match:
+            if confidence_level >= confidence_threshold:  # Only trigger for trades with a high enough confidence
+                # Record trade details
                 trade = {
                     "ticker": ticker,
                     "rsi": round(data['RSI'].iloc[-1], 2),
@@ -235,3 +239,4 @@ if trade_button:
         st.error("❌ No high-confidence trades found. Try again later.")
     else:
         st.success("✅ High-confidence trade(s) found!")
+
