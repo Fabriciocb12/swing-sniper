@@ -118,7 +118,7 @@ if trade_button:
             if isinstance(data.columns, pd.MultiIndex):
                 data.columns = [col[0] for col in data.columns]  # Flatten to single level
 
-            # Calculate Bollinger Bands manually
+            # Calculate Bollinger Bands manually (Fixing the bollinger_width issue)
             data['bb_upper'] = ta.volatility.bollinger_hband(data['Close'])
             data['bb_lower'] = ta.volatility.bollinger_lband(data['Close'])
             data['bb_width'] = data['bb_upper'] - data['bb_lower']  # Manual width calculation
@@ -237,3 +237,4 @@ def get_trade_confidence(data):
         base_confidence = 90  # High confidence for the strongest trades
 
     return base_confidence
+
