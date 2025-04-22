@@ -8,6 +8,8 @@ from openai import OpenAI
 import os
 import json
 from datetime import datetime
+import matplotlib.pyplot as plt
+import numpy as np
 
 # Load from secrets
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -73,6 +75,50 @@ main_tickers = [
 
 final_tickers = main_tickers + panic_assets
 
+# 🧠 Backtest Functionality
+# Add a new section for the backtest tab
+st.sidebar.title("Backtest Strategy")
+selected_ticker_backtest = st.sidebar.selectbox("Select Ticker for Backtest", final_tickers)
+
+if st.sidebar.button("Run Backtest"):
+    st.write(f"Running backtest for {selected_ticker_backtest}...")
+
+    # ✅ Fetch Data for the selected ticker
+    def fetch_data(ticker):
+        data = yf.download(ticker, period="1y", interval="1d")
+        return data
+
+    data = fetch_data(selected_ticker_backtest)
+
+    # ✅ Backtest Strategy (simple moving average crossover)
+    def backtest_strategy(data):
+        data['SMA_50'] = data['Close'].rolling(window=50).mean()  # 50-day moving average
+        data['SMA_200'] = data['Close'].rolling(window=200).mean()  # 200-day moving average
+
+        data['Signal'] = 0
+        data['Signal'][50:] = np.where(data['SMA_50'][50:] > data['SMA_200'][50:], 1, 0)
+        data['Position'] = data['Signal'].diff()
+
+        data['P&L'] = data['Position'] * data['Close'].pct_change()
+        data['Portfolio'] = (1 + data['P&L']).cumprod()
+
+        return data
+
+    backtest_results = backtest_strategy(data)
+
+    # ✅ Plot Results
+    def plot_results(data):
+        plt.figure(figsize=(10,6))
+        plt.plot(data['Portfolio'], label='Strategy Portfolio', color='blue')
+        plt.title('Backtest Results - Portfolio Performance')
+        plt.xlabel('Date')
+        plt.ylabel('Portfolio Value')
+        plt.legend()
+        st.pyplot(plt)
+
+    plot_results(backtest_results)
+
+# Main trade scan button (already existing)
 if trade_button:
     high_confidence_trades = []
     for ticker in final_tickers:
@@ -183,37 +229,4 @@ if trade_button:
         st.error("❌ No high-confidence trades found. Try again later.")
     else:
         st.success("✅ High-confidence trade(s) found!")
-
-    # GPT Sector Outlook
-    with st.expander("🧠 Sector Sentiment Snapshot"):
-        sector_prompt = """
-        Act as a financial analyst. Evaluate current macroeconomic trends and sector outlooks for swing traders. 
-        Assess likely strength/weakness across these sectors based on news, economic indicators, and seasonality:
-        - Technology
-        - Healthcare
-        - Financials
-        - Energy
-        - Consumer Staples
-        - Consumer Discretionary
-        - Communication Services
-        - Industrials
-        - Real Estate
-        - Materials
-        - Utilities
-        - Crypto
-        - Commodities
-
-        For each sector, write 1 sentence with current strength (+, -, or ~) and brief reasoning.
-        Then give a 4-line summary of the best opportunities.
-        """
-        try:
-            sector_response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": sector_prompt}]
-            )
-            summary = sector_response.choices[0].message.content
-            st.text_area("GPT Sector Analysis", value=summary, height=300)
-            send_email("🧠 GPT Sector Snapshot", summary)
-        except Exception as e:
-            st.error(f"⚠️ Sector GPT error: {e}")
 
