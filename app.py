@@ -282,4 +282,3 @@ if trade_button:
     else:
         st.success("✅ High-confidence trade(s) found!")
 
-
