@@ -109,73 +109,62 @@ if trade_button:
                 continue
 
             status_placeholder.info(f"🔎 Scanning {ticker}...")
+
             data = yf.download(ticker, period="3mo", interval="1d", auto_adjust=True)
-            if isinstance(data.columns, pd.MultiIndex):
-                data.columns = [col[0] for col in data.columns]
-            data.rename(columns=lambda x: str(x).capitalize(), inplace=True)
 
-            required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-            if not all(col in data.columns for col in required_cols):
-                continue
+            # Add the new indicators using the `ta` library
+            data['bbm'] = ta.volatility.bollinger_mavg(data['Close'])
+            data['bbw'] = ta.volatility.bollinger_width(data['Close'])
+            data['bb_upper'] = ta.volatility.bollinger_hband(data['Close'])
+            data['bb_lower'] = ta.volatility.bollinger_lband(data['Close'])
 
-            data = ta.add_all_ta_features(
-                data,
-                open="Open", high="High", low="Low", close="Close", volume="Volume",
-                fillna=True
-            )
+            data['ATR'] = ta.volatility.average_true_range(data['High'], data['Low'], data['Close'], window=14)
+            data['OBV'] = ta.volume.on_balance_volume(data['Close'], data['Volume'])
 
-            latest = data.iloc[-1]
-            rsi = latest["momentum_rsi"]
-            stochrsi = latest["momentum_stoch_rsi"]
-            macd = latest["trend_macd"]
-            macd_signal = latest["trend_macd_signal"]
-            macd_hist = macd - macd_signal
-            ma20 = latest["trend_sma_fast"]
-            ma150 = latest["trend_sma_slow"]
-            close = latest["Close"]
-            bbm = latest["volatility_bbm"]
-            bbw = latest["volatility_bbw"]
-            bb_low = bbm - bbw
-            volume = latest["Volume"]
-            avg_volume = data["Volume"].rolling(window=20).mean().iloc[-1]
-            adx = latest["trend_adx"]
+            data['MACD'] = ta.trend.macd(data['Close'])
+            data['MACD_signal'] = ta.trend.macd_signal(data['Close'])
+            data['MACD_hist'] = data['MACD'] - data['MACD_signal']
 
-            match = (
-                rsi < 35 and
-                stochrsi < 0.2 and
-                macd > macd_signal and
-                macd_hist > 0 and
-                close > ma150 and close < ma20 and
-                close <= bb_low and
-                volume > avg_volume and
-                adx > 20
-            )
+            data['EMA9'] = ta.trend.ema_indicator(data['Close'], window=9)
+            data['EMA21'] = ta.trend.ema_indicator(data['Close'], window=21)
+
+            # Get dynamic confidence level based on new criteria
+            confidence_threshold = get_trade_confidence(data)
+
+            # Evaluate trade criteria (loosened conditions for 30-40% confidence range)
+            match = False
+            if (
+                data['RSI'].iloc[-1] < 50 and
+                data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
+                data['Close'].iloc[-1] > data['bb_upper'].iloc[-1] and
+                data['ATR'].iloc[-1] > data['ATR'].mean() and
+                data['OBV'].iloc[-1] > data['OBV'].iloc[-2]
+            ):
+                match = True
 
             if match:
                 trade = {
                     "ticker": ticker,
-                    "rsi": round(rsi, 2),
-                    "stochrsi": round(stochrsi, 2),
-                    "macd_hist": round(macd_hist, 3),
-                    "close": round(close, 2),
-                    "ma20": round(ma20, 2),
-                    "ma150": round(ma150, 2),
-                    "volume": round(volume),
-                    "avg_volume": round(avg_volume),
-                    "adx": round(adx, 2)
+                    "rsi": round(data['RSI'].iloc[-1], 2),
+                    "macd_hist": round(data['MACD_hist'].iloc[-1], 3),
+                    "close": round(data['Close'].iloc[-1], 2),
+                    "ema9": round(data['EMA9'].iloc[-1], 2),
+                    "ema21": round(data['EMA21'].iloc[-1], 2),
+                    "volume": round(data['Volume'].iloc[-1]),
+                    "bb_upper": round(data['bb_upper'].iloc[-1], 2),
                 }
 
+                # Send email and log trade details
                 prompt = f"""
                 You are an expert swing trader. Given the following data, write a 3-4 sentence recommendation:
                 - Ticker: {trade['ticker']}
                 - RSI: {trade['rsi']}
-                - Stochastic RSI: {trade['stochrsi']}
                 - MACD Histogram: {trade['macd_hist']}
                 - Close: {trade['close']}
-                - MA20: {trade['ma20']}
-                - MA150: {trade['ma150']}
-                - Volume: {trade['volume']} vs avg {trade['avg_volume']}
-                - ADX: {trade['adx']}
+                - EMA9: {trade['ema9']}
+                - EMA21: {trade['ema21']}
+                - Volume: {trade['volume']}
+                - Bollinger Band Upper: {trade['bb_upper']}
 
                 Include:
                 - Confidence level from 0% to 100%
@@ -198,7 +187,7 @@ if trade_button:
                 # ✅ Lock the trade
                 locked_positions[ticker] = {
                     "entry_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "entry_price": float(close),
+                    "entry_price": float(trade['close']),
                     "note": "Locked by model"
                 }
                 save_locked_positions()
@@ -211,3 +200,35 @@ if trade_button:
     else:
         st.success("✅ High-confidence trade(s) found!")
 
+# Define the dynamic confidence function
+def get_trade_confidence(data):
+    base_confidence = 50  # Default confidence for medium confidence trades
+    
+    # Low confidence (30-40% confidence for riskier trades)
+    if (
+        data['RSI'].iloc[-1] < 50 and  # Loosen RSI condition (below 50)
+        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # MACD above signal line
+        data['Close'].iloc[-1] > data['bb_upper'].iloc[-1] and  # Breakout above upper Bollinger Band
+        data['ATR'].iloc[-1] > data['ATR'].mean() and  # High ATR (indicating higher volatility)
+        data['OBV'].iloc[-1] > data['OBV'].iloc[-2]  # Increasing OBV (buying pressure)
+    ):
+        base_confidence = 30  # Low confidence for riskier trades
+
+    # Medium confidence (50-70% confidence for standard trades)
+    elif (
+        data['RSI'].iloc[-1] < 35 and  # Stronger oversold condition
+        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # Strong MACD alignment
+        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1]  # EMA9 above EMA21 for stronger momentum
+    ):
+        base_confidence = 60  # Medium confidence for standard trades
+
+    # High confidence (80-90% confidence for stricter trades)
+    elif (
+        data['RSI'].iloc[-1] < 30 and  # Very strong oversold condition
+        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # Very strong MACD alignment
+        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1] and  # EMA9 above EMA21
+        data['BB_upper'].iloc[-1] < data['Close'].iloc[-1]  # Strong breakout above the upper Bollinger Band
+    ):
+        base_confidence = 90  # High confidence for the strongest trades
+
+    return base_confidence
