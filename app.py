@@ -171,14 +171,21 @@ if trade_button:
 
             # Evaluate trade criteria (loosened conditions for 30-40% confidence range)
             match = False
-            if (
-                data['RSI'].iloc[-1] < 50 and
-                data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and
-                data['Close'].iloc[-1] > data['bb_upper'].iloc[-1] and
-                data['ATR'].iloc[-1] > data['ATR'].mean() and
-                data['OBV'].iloc[-1] > data['OBV'].iloc[-2]
-            ):
-                match = True
+            rsi_condition = data['RSI'].iloc[-1] < 50  # Loosened RSI condition (below 50)
+            macd_condition = data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1]  # MACD above signal line
+            bollinger_condition = data['Close'].iloc[-1] > data['bb_upper'].iloc[-1]  # Breakout above upper Bollinger Band
+            atr_condition = data['ATR'].iloc[-1] > data['ATR'].mean()  # High ATR (indicating higher volatility)
+            obv_condition = data['OBV'].iloc[-1] > data['OBV'].iloc[-2]  # Increasing OBV (buying pressure)
+
+            # Print each condition for debugging
+            st.write(f"RSI condition: {rsi_condition}")
+            st.write(f"MACD condition: {macd_condition}")
+            st.write(f"Bollinger condition: {bollinger_condition}")
+            st.write(f"ATR condition: {atr_condition}")
+            st.write(f"OBV condition: {obv_condition}")
+
+            # Combine all conditions for the match
+            match = rsi_condition and macd_condition and bollinger_condition and atr_condition and obv_condition
 
             if match:
                 trade = {
