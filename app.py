@@ -12,7 +12,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 # Import backtest functions from backtest_tab.py
-from backtest_tab import backtest_tab
+from backtest_tab import backtest_tab  # <-- Correct import statement
 
 # Load from secrets
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -80,6 +80,39 @@ main_tickers = [
 
 final_tickers = main_tickers + panic_assets
 
+# Define the dynamic confidence function
+def get_trade_confidence(data):
+    base_confidence = 50  # Default confidence for medium confidence trades
+    
+    # Low confidence (30-40% confidence for riskier trades)
+    if (
+        data['RSI'].iloc[-1] < 50 and  # Loosen RSI condition (below 50)
+        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # MACD above signal line
+        data['Close'].iloc[-1] > data['bb_upper'].iloc[-1] and  # Breakout above upper Bollinger Band
+        data['ATR'].iloc[-1] > data['ATR'].mean() and  # High ATR (indicating higher volatility)
+        data['OBV'].iloc[-1] > data['OBV'].iloc[-2]  # Increasing OBV (buying pressure)
+    ):
+        base_confidence = 30  # Low confidence for riskier trades
+
+    # Medium confidence (50-70% confidence for standard trades)
+    elif (
+        data['RSI'].iloc[-1] < 35 and  # Stronger oversold condition
+        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # Strong MACD alignment
+        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1]  # EMA9 above EMA21 for stronger momentum
+    ):
+        base_confidence = 60  # Medium confidence for standard trades
+
+    # High confidence (80-90% confidence for stricter trades)
+    elif (
+        data['RSI'].iloc[-1] < 30 and  # Very strong oversold condition
+        data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # Very strong MACD alignment
+        data['EMA9'].iloc[-1] > data['EMA21'].iloc[-1] and  # EMA9 above EMA21
+        data['BB_upper'].iloc[-1] < data['Close'].iloc[-1]  # Strong breakout above the upper Bollinger Band
+    ):
+        base_confidence = 90  # High confidence for the strongest trades
+
+    return base_confidence
+
 # 🧠 Backtest Functionality
 # Add a new section for the backtest tab
 st.sidebar.title("Backtest Strategy")
@@ -120,7 +153,7 @@ if trade_button:
 
             # Manually calculate RSI
             data['RSI'] = ta.momentum.rsi(data['Close'], window=14)
-            
+
             # Debugging: Ensure RSI is being added to DataFrame
             st.write(data[['Close', 'RSI']].tail())  # Display last few rows of Close and RSI
 
