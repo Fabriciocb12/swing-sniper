@@ -80,14 +80,14 @@ final_tickers = main_tickers + panic_assets
 
 # Define the dynamic confidence function
 def get_trade_confidence(data):
-    base_confidence = 50  # Default confidence for medium confidence trades
+    base_confidence = 50  # Default confidence for moderate trades
     
-    # 1% confidence (very sensitive model)
+    # 1% confidence (very sensitive model) - **Only allow during strong trends**
     if (
-        data['RSI'].iloc[-1] < 40 and  # Relaxed RSI
+        data['RSI'].iloc[-1] < 40 and  # Relaxed RSI condition (potentially oversold)
         data['MACD'].iloc[-1] > data['MACD_signal'].iloc[-1] and  # MACD alignment
-        data['Close'].iloc[-1] > data['bb_middle'].iloc[-1] and  # Price near middle of BB
-        data['ATR'].iloc[-1] > data['ATR'].mean() and  # High ATR (indicating volatility)
+        data['Close'].iloc[-1] > data['bb_middle'].iloc[-1] and  # Price near the middle of BB
+        data['ATR'].iloc[-1] > data['ATR'].mean() and  # ATR (indicating high volatility)
         data['OBV'].iloc[-1] > data['OBV'].iloc[-2]  # OBV increasing (buying pressure)
     ):
         print("1% confidence triggered")
